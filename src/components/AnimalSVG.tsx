@@ -6,10 +6,26 @@
 import React from "react";
 import { AnimalSpecies } from "../types";
 
-// НАСТРОЙКА ЭКСПОРТА И СПРАЙТОВ:
-// Поменяйте этот флаг на true, когда зальёте свои PNG-картинки в папку `/public/assets/animals/`!
-// Игра будет автоматически загружать ваши новые спрайты, а отсутствующие плавно заменять векторными.
-export const USE_PNG_SPRITES = false;
+// НАСТРОЙКА СПРАЙТОВ ИЗ ФАЙЛОВ:
+// true — загружать файлы из `/public/assets/animals/` (SVG или PNG).
+// Сначала ищется .svg, затем .png; если ничего нет — встроенный SVG в коде.
+export const USE_CUSTOM_SPRITES = false;
+/** @deprecated имя сохранено для совместимости — используйте USE_CUSTOM_SPRITES */
+export const USE_PNG_SPRITES = USE_CUSTOM_SPRITES;
+
+function getSpriteBaseName(isSheared: boolean, isSad: boolean, isDirty: boolean): string {
+  if (isSheared) return "bald";
+  if (isSad) return "hungry";
+  if (isDirty) return "dirty";
+  return "happy";
+}
+
+function getSpriteCandidates(folderName: string, baseName: string): string[] {
+  return [
+    `/assets/animals/${folderName}/${baseName}.svg`,
+    `/assets/animals/${folderName}/${baseName}.png`,
+  ];
+}
 
 export interface AnimalSVGProps {
   species: AnimalSpecies;
@@ -28,34 +44,45 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
   cleanliness,
   className = ""
 }) => {
-  const [imgFailed, setImgFailed] = React.useState(false);
   const isSad = !isFed || happiness < 40;
   const isDirty = cleanliness < 50;
+  const folderName = species.toLowerCase();
+  const spriteBaseName = getSpriteBaseName(!!isSheared, isSad, isDirty);
+  const spriteCandidates = React.useMemo(
+    () => getSpriteCandidates(folderName, spriteBaseName),
+    [folderName, spriteBaseName]
+  );
 
-  // Если включены спрайты и картинка загрузилась успешно, рендерим PNG-спрайт
-  if (USE_PNG_SPRITES && !imgFailed) {
-    const folderName = species.toLowerCase();
-    let spriteFileName = "happy.png";
-    if (isSheared) {
-      spriteFileName = "bald.png";
-    } else if (isSad) {
-      spriteFileName = "hungry.png";
-    } else if (isDirty) {
-      spriteFileName = "dirty.png";
-    }
+  const [candidateIndex, setCandidateIndex] = React.useState(0);
+  const [fileSpritesFailed, setFileSpritesFailed] = React.useState(false);
 
-    const spriteSrc = `/assets/animals/${folderName}/${spriteFileName}`;
+  React.useEffect(() => {
+    setCandidateIndex(0);
+    setFileSpritesFailed(false);
+  }, [species, spriteBaseName]);
+
+  // Файловый спрайт: SVG → PNG → встроенный SVG
+  if (USE_CUSTOM_SPRITES && !fileSpritesFailed) {
+    const spriteSrc = spriteCandidates[candidateIndex];
 
     return (
       <div className={`w-full h-full flex items-center justify-center relative ${className}`}>
         <img
+          key={spriteSrc}
           src={spriteSrc}
-          alt={`${species} current sprite`}
+          alt={`${species} ${spriteBaseName}`}
           referrerPolicy="no-referrer"
           className="w-full h-full object-contain filter drop-shadow-md select-none transition-transform active:scale-95 duration-200"
           onError={() => {
-            console.warn(`PNG-спрайт ${spriteSrc} не найден. Игра плавно переключилась на встроенный интерактивный SVG!`);
-            setImgFailed(true);
+            const nextIndex = candidateIndex + 1;
+            if (nextIndex < spriteCandidates.length) {
+              setCandidateIndex(nextIndex);
+              return;
+            }
+            console.warn(
+              `Спрайты ${spriteCandidates.join(", ")} не найдены. Игра переключилась на встроенный SVG.`
+            );
+            setFileSpritesFailed(true);
           }}
         />
       </div>
