@@ -1,0 +1,6 @@
+{
+  "name": "Ферма Макса",
+  "description": "Развивающая и добрая 2D игра-ферма про уход за животными, садоводство и обустройство уютных загонов для Максима.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
