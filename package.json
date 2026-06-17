@@ -1,12 +1,15 @@
 {
-  "name": "react-example",
+  "name": "max-farm",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "dev": "vite --port=5173 --host=0.0.0.0 --strictPort",
-    "build": "vite build",
-    "preview": "vite preview",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host=0.0.0.0 --port=4173",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },

@@ -1,6 +1,8 @@
 import React from "react";
 import { WorkerSVG } from "./WorkerSVG";
 import { playClickSound } from "../lib/audio";
+import { beginLongPress, endLongPress } from "../lib/input/longPress";
+import { reportInputDebug } from "../lib/input/inputDebug";
 
 interface MaxHomeInteriorProps {
   ownedFurniture: string[];
@@ -15,10 +17,12 @@ export const MaxHomeInterior: React.FC<MaxHomeInteriorProps> = ({
   const has = (id: string) => ownedFurniture.includes(id);
   const isEmpty = ownedFurniture.length === 0;
 
-  const handleRomanClick = (e: React.MouseEvent) => {
+  const handleRomanPointerUp = (e: React.PointerEvent) => {
     e.stopPropagation();
+    if (endLongPress(e.pointerId).wasLongPress) return;
     playClickSound();
     onOpenShop();
+    reportInputDebug(e.pointerType, "tap", "max-home-roman");
   };
 
   return (
@@ -130,10 +134,29 @@ export const MaxHomeInterior: React.FC<MaxHomeInteriorProps> = ({
       >
         <button
           type="button"
-          onClick={handleRomanClick}
-          className="flex flex-col items-center cursor-pointer hover:scale-105 active:scale-95 transition-transform animate-walk-wobble"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            beginLongPress(
+              e.pointerId,
+              "max-home-roman",
+              e.clientX,
+              e.clientY,
+              () => {
+                playClickSound();
+                reportInputDebug(e.pointerType, "longPress", "max-home-roman");
+              },
+              { pointerType: e.pointerType }
+            );
+          }}
+          onPointerUp={handleRomanPointerUp}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            reportInputDebug("mouse", "context", "max-home-roman");
+          }}
+          className="flex flex-col items-center cursor-pointer hover:scale-105 active:scale-95 transition-transform animate-walk-wobble touch-none"
           id="max-home-roman-npc"
-          title="Роман-домовой — магазин мебели"
+          aria-label="Роман-домовой — магазин мебели"
         >
         <div className="absolute -top-16 px-2.5 py-1 bg-rose-100 border-2 border-rose-500 text-rose-950 rounded-xl text-[9px] font-black shadow-lg whitespace-nowrap animate-pulse">
           👆 Нажми — купить мебель!

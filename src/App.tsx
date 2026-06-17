@@ -68,6 +68,15 @@ import { MaxHomeInterior } from "./components/MaxHomeInterior";
 import { MaxHomeShop } from "./components/MaxHomeShop";
 import { MAX_HOME_FURNITURE } from "./data/maxHomeFurniture";
 import { LocationMapModal } from "./components/LocationMapModal";
+import { InputDebugOverlay } from "./components/InputDebugOverlay";
+import { isDoubleTap } from "./lib/input/doubleTap";
+import {
+  beginLongPress,
+  cancelLongPress,
+  endLongPress,
+  moveLongPress,
+} from "./lib/input/longPress";
+import { reportInputDebug } from "./lib/input/inputDebug";
 import { PondFish } from "./types";
 import { Sparkles, Trophy, Sprout, Heart, MapPin, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, BookOpen, ShoppingBag, Coins, RefreshCw, Star, Trash2 } from "lucide-react";
 
@@ -108,6 +117,7 @@ export default function App() {
 
   const [selectedAnimalId, setSelectedAnimalId] = useState<string | null>(null);
   const [draggedAnimalId, setDraggedAnimalId] = useState<string | null>(null);
+  const [draggedWorkerId, setDraggedWorkerId] = useState<string | null>(null);
   const [selectedPlotId, setSelectedPlotId] = useState<string | null>(null);
   const [selectedTreeId, setSelectedTreeId] = useState<string | null>(null);
   const [showShopModal, setShowShopModal] = useState<boolean>(false);
@@ -126,6 +136,10 @@ export default function App() {
     actionLabel?: string;
     actionTimer: number;
     currentZone: LocationId;
+    vx?: number;
+    vy?: number;
+    angle?: number;
+    groundY?: number;
   }>>({
     "worker-papa": { x: 25, y: 72, targetX: 25, targetY: 72, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MEADOW" },
     "worker-mama": { x: 38, y: 74, targetX: 38, targetY: 74, isMoving: false, dir: "right", actionTimer: 0, currentZone: "BARNYARD" },
@@ -1190,6 +1204,13 @@ export default function App() {
   const isAnimalDraggingConfirmedRef = useRef<boolean>(false);
   const pendingAnimalIdRef = useRef<string | null>(null);
   const pendingAnimalSpeciesRef = useRef<AnimalSpecies | null>(null);
+  const workerPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const workerPressStartCoordsRef = useRef<{ x: number; y: number } | null>(null);
+  const isWorkerDraggingConfirmedRef = useRef<boolean>(false);
+  const pendingWorkerIdRef = useRef<string | null>(null);
+  const workerDraggedDistanceRef = useRef(0);
+  const lastWorkerDragCoordsRef = useRef<{ x: number; y: number; t: number }[]>([]);
+  const justFinishedDraggingWorkerRef = useRef<boolean>(false);
   const audioUnlockedRef = useRef(false);
   const lastWindRef = useRef(0);
   const animalSpacingTickRef = useRef(0);
@@ -1199,7 +1220,7 @@ export default function App() {
     const walkTimer = setInterval(() => {
       // 1. Move player boy
       setBoyPosition((prev) => {
-        if (draggedAnimalId) {
+        if (draggedAnimalId || draggedWorkerId) {
           // Keep stationary and reset targeting while dragging an animal!
           return { ...prev, targetX: prev.x, targetY: prev.y, isMoving: false };
         }
@@ -1380,6 +1401,52 @@ export default function App() {
           if (!workerInst?.isActive) return;
           const wPos = next[wid];
           if (wPos.currentZone !== activeZoneRef.current) return;
+          if (wid === draggedWorkerId) return;
+
+          let wx = w.x;
+          let wy = w.y;
+          let wvx = w.vx ?? 0;
+          let wvy = w.vy ?? 0;
+          let wangle = w.angle ?? 0;
+          const wGroundY = w.groundY ?? wy;
+
+          if (wy < wGroundY || Math.abs(wvy) > 0.05 || Math.abs(wvx) > 0.05) {
+            wvy += 0.45;
+            wy += wvy;
+            wx += wvx;
+            wvx *= 0.96;
+            if (wy < wGroundY) {
+              wangle += wvx * 3.5;
+            } else {
+              wangle *= 0.65;
+              if (Math.abs(wangle) < 0.5) wangle = 0;
+            }
+            if (wx < 5) { wx = 5; wvx = -wvx * 0.55; }
+            if (wx > 95) { wx = 95; wvx = -wvx * 0.55; }
+            if (wy >= wGroundY) {
+              wy = wGroundY;
+              if (Math.abs(wvy) > 0.5) {
+                wvy = -wvy * 0.35;
+                wvx *= 0.82;
+              } else {
+                wvy = 0;
+                wvx *= 0.88;
+              }
+            }
+            next[wid] = {
+              ...w,
+              x: wx,
+              y: wy,
+              vx: wvx,
+              vy: wvy,
+              angle: wangle,
+              isMoving: false,
+              targetX: wx,
+              targetY: wy,
+            };
+            updated = true;
+            return;
+          }
 
           // Tick action bubble timer If active
           let currentActionTimer = w.actionTimer;
@@ -1481,7 +1548,7 @@ export default function App() {
     }, 30);
 
     return () => clearInterval(walkTimer);
-  }, [draggedAnimalId]);
+  }, [draggedAnimalId, draggedWorkerId]);
 
   // Keyboard controls
   useEffect(() => {
@@ -1564,38 +1631,166 @@ export default function App() {
     });
   };
 
-  const handleAnimalStartDrag = (e: React.MouseEvent | React.TouchEvent, animalId: string, species: AnimalSpecies) => {
+  const handleAnimalPointerDown = (e: React.PointerEvent, animalId: string, species: AnimalSpecies) => {
     e.stopPropagation();
+    if (e.pointerType === "touch") e.preventDefault();
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
 
-    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+    reportInputDebug(e.pointerType, "pointerDown", animalId);
+    beginLongPress(
+      e.pointerId,
+      animalId,
+      e.clientX,
+      e.clientY,
+      () => handleAnimalLongPress(animalId),
+      { pointerType: e.pointerType }
+    );
 
     pendingAnimalIdRef.current = animalId;
     pendingAnimalSpeciesRef.current = species;
-    animalPressStartCoordsRef.current = { x: clientX, y: clientY };
+    animalPressStartCoordsRef.current = { x: e.clientX, y: e.clientY };
     isAnimalDraggingConfirmedRef.current = false;
 
     if (animalPressTimerRef.current) clearTimeout(animalPressTimerRef.current);
     animalPressTimerRef.current = setTimeout(() => {
       if (pendingAnimalIdRef.current === animalId) {
+        cancelLongPress(e.pointerId);
         triggerAnimalDragConfirmed(animalId, species);
+        reportInputDebug(e.pointerType, "drag", animalId);
       }
-    }, 220); // 220ms holding threshold to distinguish tapping from holding
+    }, 220);
+  };
+
+  const handleAnimalLongPress = (animalId: string) => {
+    const animal = gameState.animals.find((a) => a.id === animalId);
+    if (!animal) return;
+    unlockAudio();
+    const template = ANIMAL_TEMPLATES[animal.species];
+    const foodType = template.foodType;
+    const hasFood = (gameState.inventory[foodType] || 0) > 0;
+    if (!animal.isFed && hasFood) {
+      handleFeedAnimal(animalId);
+      triggerNotification(`🍽️ Быстрое кормление: ${animal.customName}!`);
+      return;
+    }
+    triggerNotification(
+      `ℹ️ ${animal.customName} (${template.nameRu}) — сытость: ${animal.isFed ? "да" : "нет"}, настроение: ${Math.round(animal.happiness)}%`
+    );
+  };
+
+  const screenToPasturePercent = (
+    clientX: number,
+    clientY: number,
+    container: HTMLDivElement
+  ) => {
+    const rect = container.getBoundingClientRect();
+    const fractionX = (clientX - rect.left) / rect.width;
+    const fractionY = (clientY - rect.top) / rect.height;
+    const internalX = (fractionX * 100 + shiftPercent) / zoomScale;
+    const internalY = 100 - ((1 - fractionY) * 100) / zoomScale;
+    return {
+      x: Math.max(5, Math.min(95, internalX)),
+      y: Math.max(30, Math.min(84, internalY)),
+    };
+  };
+
+  const triggerWorkerDragConfirmed = (workerId: string) => {
+    if (isWorkerDraggingConfirmedRef.current) return;
+    isWorkerDraggingConfirmedRef.current = true;
+    setDraggedWorkerId(workerId);
+    workerDraggedDistanceRef.current = 0;
+    const pos = workersPositions[workerId];
+    lastWorkerDragCoordsRef.current = [
+      { x: pos?.x ?? 50, y: pos?.y ?? 72, t: Date.now() },
+    ];
+  };
+
+  const handleWorkerGreeting = (workerId: string, pointerType?: string) => {
+    const worker = workersRef.current?.find((w) => w.id === workerId);
+    if (!worker) return;
+    unlockAudio();
+    playNpcClickSound(worker.id);
+    triggerNotification(`${worker.emoji} Привет! Меня зовут ${worker.name}!`);
+    setWorkersPositions((prev) => {
+      const pos = prev[workerId];
+      if (!pos) return prev;
+      return {
+        ...prev,
+        [workerId]: {
+          ...pos,
+          actionLabel: `Я — ${worker.name}!`,
+          actionTimer: 2800,
+        },
+      };
+    });
+    const pos = workersPositions[workerId];
+    if (pos) spawnFloatHeart(pos.x, pos.y - 10, "💬");
+    reportInputDebug(pointerType, "tap", workerId);
+  };
+
+  const handleWorkerPointerDown = (e: React.PointerEvent, workerId: string) => {
+    e.stopPropagation();
+    if (e.pointerType === "touch") e.preventDefault();
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+
+    reportInputDebug(e.pointerType, "pointerDown", workerId);
+    pendingWorkerIdRef.current = workerId;
+    workerPressStartCoordsRef.current = { x: e.clientX, y: e.clientY };
+    isWorkerDraggingConfirmedRef.current = false;
+
+    if (workerPressTimerRef.current) clearTimeout(workerPressTimerRef.current);
+    workerPressTimerRef.current = setTimeout(() => {
+      if (pendingWorkerIdRef.current === workerId) {
+        triggerWorkerDragConfirmed(workerId);
+        reportInputDebug(e.pointerType, "drag", workerId);
+      }
+    }, 220);
+  };
+
+  const handleWorkerDragMove = (clientX: number, clientY: number, container: HTMLDivElement) => {
+    if (!draggedWorkerId) return;
+
+    const { x: constrainedX, y: constrainedY } = screenToPasturePercent(clientX, clientY, container);
+    const now = Date.now();
+    const list = lastWorkerDragCoordsRef.current;
+    list.push({ x: constrainedX, y: constrainedY, t: now });
+    if (list.length > 5) list.shift();
+
+    setWorkersPositions((prev) => {
+      const w = prev[draggedWorkerId];
+      if (!w) return prev;
+      const dx = constrainedX - w.x;
+      const dy = constrainedY - w.y;
+      workerDraggedDistanceRef.current += Math.abs(dx) + Math.abs(dy);
+      return {
+        ...prev,
+        [draggedWorkerId]: {
+          ...w,
+          x: constrainedX,
+          y: constrainedY,
+          vx: dx * 0.98,
+          vy: dy * 0.98,
+          groundY: w.groundY || Math.max(58, Math.min(84, constrainedY)),
+          isMoving: false,
+          targetX: constrainedX,
+          targetY: constrainedY,
+        },
+      };
+    });
   };
 
   const handlePastureDragMove = (clientX: number, clientY: number, container: HTMLDivElement) => {
     if (!draggedAnimalId) return;
 
-    const rect = container.getBoundingClientRect();
-    const fractionX = (clientX - rect.left) / rect.width;
-    const fractionY = (clientY - rect.top) / rect.height;
-
-    // Inverse mathematical screen translation
-    const internalX = (fractionX * 100 + shiftPercent) / zoomScale;
-    const internalY = 100 - ((1 - fractionY) * 100) / zoomScale;
-
-    const constrainedX = Math.max(5, Math.min(95, internalX));
-    const constrainedY = Math.max(30, Math.min(84, internalY)); // allow tossing up to the sky
+    const { x: constrainedX, y: constrainedY } = screenToPasturePercent(clientX, clientY, container);
 
     const now = Date.now();
     const list = lastDragCoordsRef.current;
@@ -1630,56 +1825,87 @@ export default function App() {
     });
   };
 
-  const handlePastureMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handlePasturePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (pendingWorkerIdRef.current && !draggedWorkerId) {
+      const start = workerPressStartCoordsRef.current;
+      if (start) {
+        const dx = e.clientX - start.x;
+        const dy = e.clientY - start.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 9) {
+          if (workerPressTimerRef.current) {
+            clearTimeout(workerPressTimerRef.current);
+            workerPressTimerRef.current = null;
+          }
+          triggerWorkerDragConfirmed(pendingWorkerIdRef.current);
+          reportInputDebug(e.pointerType, "drag", pendingWorkerIdRef.current);
+        }
+      }
+    }
     if (pendingAnimalIdRef.current && !draggedAnimalId) {
       const start = animalPressStartCoordsRef.current;
       if (start) {
         const dx = e.clientX - start.x;
         const dy = e.clientY - start.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
+        moveLongPress(e.pointerId, e.clientX, e.clientY);
         if (dist > 9) {
           if (animalPressTimerRef.current) {
             clearTimeout(animalPressTimerRef.current);
             animalPressTimerRef.current = null;
           }
-          triggerAnimalDragConfirmed(pendingAnimalIdRef.current, pendingAnimalSpeciesRef.current!);
+          cancelLongPress(e.pointerId);
+          triggerAnimalDragConfirmed(
+            pendingAnimalIdRef.current,
+            pendingAnimalSpeciesRef.current!
+          );
+          reportInputDebug(e.pointerType, "drag", pendingAnimalIdRef.current);
         }
       }
+    }
+    if (draggedWorkerId) {
+      if (e.pointerType === "touch") e.preventDefault();
+      handleWorkerDragMove(e.clientX, e.clientY, e.currentTarget);
+      reportInputDebug(e.pointerType, "drag", draggedWorkerId);
+      return;
     }
     if (draggedAnimalId) {
+      if (e.pointerType === "touch") e.preventDefault();
       handlePastureDragMove(e.clientX, e.clientY, e.currentTarget);
+      reportInputDebug(e.pointerType, "drag", draggedAnimalId);
     }
   };
 
-  const handlePastureTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (pendingAnimalIdRef.current && !draggedAnimalId && e.touches.length > 0) {
-      const start = animalPressStartCoordsRef.current;
-      if (start) {
-        const dx = e.touches[0].clientX - start.x;
-        const dy = e.touches[0].clientY - start.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > 9) {
-          if (animalPressTimerRef.current) {
-            clearTimeout(animalPressTimerRef.current);
-            animalPressTimerRef.current = null;
-          }
-          triggerAnimalDragConfirmed(pendingAnimalIdRef.current, pendingAnimalSpeciesRef.current!);
+  const handlePasturePointerUp = (e?: React.PointerEvent<HTMLDivElement>) => {
+    if (workerPressTimerRef.current) {
+      clearTimeout(workerPressTimerRef.current);
+      workerPressTimerRef.current = null;
+    }
+
+    if (pendingWorkerIdRef.current && !isWorkerDraggingConfirmedRef.current) {
+      handleWorkerGreeting(pendingWorkerIdRef.current, e?.pointerType);
+    }
+    pendingWorkerIdRef.current = null;
+
+    if (e) {
+      const { wasLongPress } = endLongPress(e.pointerId);
+      if (wasLongPress) {
+        if (animalPressTimerRef.current) {
+          clearTimeout(animalPressTimerRef.current);
+          animalPressTimerRef.current = null;
         }
+        pendingAnimalIdRef.current = null;
+        pendingAnimalSpeciesRef.current = null;
+        return;
       }
     }
-    if (draggedAnimalId && e.touches.length > 0) {
-      handlePastureDragMove(e.touches[0].clientX, e.touches[0].clientY, e.currentTarget);
-    }
-  };
 
-  const handlePastureMouseUp = () => {
     if (animalPressTimerRef.current) {
       clearTimeout(animalPressTimerRef.current);
       animalPressTimerRef.current = null;
     }
 
     if (pendingAnimalIdRef.current && !isAnimalDraggingConfirmedRef.current) {
-      // Simple quiet light click - select & groom animal!
       const animalInstance = gameState.animals.find((a) => a.id === pendingAnimalIdRef.current);
       if (animalInstance) {
         unlockAudio();
@@ -1691,11 +1917,57 @@ export default function App() {
         const nameLabel = template.nameRu.split(" ")[0];
         playAnimalClickSound(template.soundType, nameLabel);
         triggerNotification(`🐕 Гладим питомца: ${animalInstance.customName}!`);
+        reportInputDebug(e?.pointerType, "tap", animalInstance.id);
       }
     }
 
     pendingAnimalIdRef.current = null;
     pendingAnimalSpeciesRef.current = null;
+
+    if (draggedWorkerId) {
+      const list = lastWorkerDragCoordsRef.current;
+      let calculatedVx = 0;
+      let calculatedVy = 0;
+      if (list.length >= 2) {
+        const first = list[0];
+        const last = list[list.length - 1];
+        const dt = Math.max(1, last.t - first.t);
+        calculatedVx = ((last.x - first.x) / dt) * 15;
+        calculatedVy = ((last.y - first.y) / dt) * 15;
+        const speed = Math.sqrt(calculatedVx * calculatedVx + calculatedVy * calculatedVy);
+        const maxSpeed = 7.0;
+        if (speed > maxSpeed) {
+          calculatedVx = (calculatedVx / speed) * maxSpeed;
+          calculatedVy = (calculatedVy / speed) * maxSpeed;
+        }
+      }
+
+      const tossedId = draggedWorkerId;
+      setDraggedWorkerId(null);
+      justFinishedDraggingWorkerRef.current = true;
+      setTimeout(() => {
+        justFinishedDraggingWorkerRef.current = false;
+      }, 150);
+
+      setWorkersPositions((prev) => {
+        const w = prev[tossedId];
+        if (!w) return prev;
+        return {
+          ...prev,
+          [tossedId]: {
+            ...w,
+            vx: calculatedVx,
+            vy: calculatedVy,
+            angle: calculatedVx * 4,
+            targetX: w.x,
+            targetY: w.y,
+            isMoving: false,
+          },
+        };
+      });
+    }
+
+    isWorkerDraggingConfirmedRef.current = false;
 
     if (draggedAnimalId) {
       const distance = draggedDistanceRef.current;
@@ -1751,6 +2023,51 @@ export default function App() {
         };
       });
     }
+  };
+
+  const handleEnterMaxHome = () => {
+    if (!isInteriorZone(activeZone)) specialReturnZoneRef.current = activeZone;
+    onSelectZoneWithLock("MAX_HOME");
+  };
+
+  const handleUpgradeMaxHouse = (heartX = 50, heartY = 50) => {
+    const currentLvl = gameState.maxHouseLevel || 1;
+    const upgradeCost = currentLvl * 300;
+    if (gameState.coins >= upgradeCost) {
+      setGameState((prev) => ({
+        ...prev,
+        coins: prev.coins - upgradeCost,
+        maxHouseLevel: currentLvl + 1,
+      }));
+      playLevelUpSound();
+      triggerNotification(`🎉 Дом Макса улучшен до уровня ${currentLvl + 1}!`);
+      spawnFloatHeart(heartX, heartY - 12, "👑");
+    } else {
+      playSadSound();
+      triggerNotification(`⚠️ Нужно ${upgradeCost} монет для улучшения!`);
+    }
+  };
+
+  const showBuildingInfo = (nameRu: string, benefitRu: string, buildingId: string, pointerType?: string) => {
+    playClickSound();
+    triggerNotification(`ℹ️ ${nameRu}: ${benefitRu}`);
+    reportInputDebug(pointerType, "context", buildingId);
+  };
+
+  const handleMaxHousePointerUp = (e: React.PointerEvent, heartX: number, heartY: number) => {
+    e.stopPropagation();
+    const { wasLongPress } = endLongPress(e.pointerId);
+    if (wasLongPress) return;
+
+    playClickSound();
+    const altAction = e.shiftKey || isDoubleTap("max-house", e);
+    if (altAction) {
+      handleUpgradeMaxHouse(heartX, heartY);
+      reportInputDebug(e.pointerType, "doubleTap", "max-house");
+      return;
+    }
+    handleEnterMaxHome();
+    reportInputDebug(e.pointerType, "tap", "max-house");
   };
 
   const handleBuyPen = (templateId: string, cost: number, minLevel: number) => {
@@ -2478,9 +2795,10 @@ export default function App() {
     }, 1100);
   };
 
-  const handlePastureTape = (e: React.MouseEvent<HTMLDivElement>) => {
-    // If we are actively dragging/re-placing or just finished throwing, do not move the boy!
-    if (draggedAnimalId || justFinishedDraggingRef.current) {
+  const handlePastureTape = (
+    e: React.MouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>
+  ) => {
+    if (draggedAnimalId || draggedWorkerId || justFinishedDraggingRef.current || justFinishedDraggingWorkerRef.current) {
       return;
     }
 
@@ -2493,27 +2811,27 @@ export default function App() {
     const fractionX = (e.clientX - rect.left) / rect.width;
     const fractionY = (e.clientY - rect.top) / rect.height;
 
-    // Inverse mathematical screen translation matching zoom scale
     const clickX = (fractionX * 100 + shiftPercent) / zoomScale;
     const clickY = 100 - ((1 - fractionY) * 100) / zoomScale;
 
     const constrainedX = Math.max(5, Math.min(95, clickX));
-    const constrainedY = Math.max(54, Math.min(86, clickY)); // Player click bounds constrained to grass!
+    const constrainedY = Math.max(54, Math.min(86, clickY));
 
     if (targetElement.closest(".interactive-element")) {
-      return; // let element click handle selection
+      return;
     }
 
     setBoyPosition((prev) => ({
       ...prev,
       targetX: constrainedX,
       targetY: constrainedY,
-      isMoving: true
+      isMoving: true,
     }));
 
     setSelectedAnimalId(null);
     setSelectedPlotId(null);
     setSelectedTreeId(null);
+    reportInputDebug("pointerType" in e ? e.pointerType : "mouse", "tap", "pasture-ground");
   };
 
   // Get active subsets of animal species currently hanging out on selected location tab
@@ -2814,13 +3132,22 @@ export default function App() {
         {/* WALKING WORLD VIEWPORT CANVAS - FULL BLEED RESIZING FOR ALL SCREENS */}
         <div className="relative w-full shadow-lg flex-1" id="playground-viewport-wrapper">
           <div
+            onPointerDown={(e) => {
+              if (e.pointerType === "touch" && !(e.target as HTMLElement).closest(".interactive-element")) {
+                e.currentTarget.setPointerCapture(e.pointerId);
+              }
+            }}
             onClick={handlePastureTape}
-            onMouseMove={handlePastureMouseMove}
-            onMouseUp={handlePastureMouseUp}
-            onMouseLeave={handlePastureMouseUp}
-            onTouchMove={handlePastureTouchMove}
-            onTouchEnd={handlePastureMouseUp}
-            onTouchCancel={handlePastureMouseUp}
+            onPointerMove={handlePasturePointerMove}
+            onPointerUp={handlePasturePointerUp}
+            onPointerLeave={handlePasturePointerUp}
+            onPointerCancel={handlePasturePointerUp}
+            onContextMenu={(e) => {
+              const el = e.target as HTMLElement;
+              if (el.closest(".interactive-element") || el.closest("#game-header")) {
+                e.preventDefault();
+              }
+            }}
             style={{
                 height: `${viewportHeightPx}px`,
                 transition: "height 280ms ease-out",
@@ -3124,7 +3451,7 @@ export default function App() {
                     setShopActiveTab("sell");
                     setShowShopModal(true);
                   }}
-                  className="bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-600 hover:to-yellow-500 text-white rounded-full border-2 border-[#7A4E31] shadow-md flex items-center justify-center gap-0.5 lg:gap-1 active:scale-95 transform transition-all p-0.5 lg:p-1 px-2 lg:px-3 pointer-events-auto cursor-pointer select-none font-sans font-black text-[8px] lg:text-[9.5px] uppercase tracking-wider shrink-0 leading-none scale-[0.92] lg:scale-100 origin-right"
+                  className="bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-600 hover:to-yellow-500 text-white rounded-full border-2 border-[#7A4E31] shadow-md flex items-center justify-center gap-0.5 active:scale-95 transform transition-all p-0.5 px-1.5 pointer-events-auto cursor-pointer select-none font-sans font-black text-[7px] uppercase tracking-wider shrink-0 leading-none scale-[0.82] origin-right"
                   id="floating-market-btn"
                 >
                   <span className="text-xs leading-none select-none">🏪</span>
@@ -3143,11 +3470,11 @@ export default function App() {
                   setShowShopModal(true);
                   triggerNotification("🏃 Бежим торговать к купцу Семену!");
                 }}
-                className="absolute right-3 bottom-[44px] w-[260px] h-[280px] cursor-pointer z-10 interactive-element hover:scale-105 active:scale-95 transition-all duration-300 flex flex-col justify-end"
+                className="absolute right-2 bottom-[48px] w-[168px] h-[182px] sm:w-[185px] sm:h-[200px] cursor-pointer z-10 interactive-element hover:scale-105 active:scale-95 transition-all duration-300 flex flex-col justify-end"
                 id="cozy-cabin"
               >
                 {isNearMerchant && (
-                  <span className="absolute top-6 left-1/2 transform -translate-x-1/2 bg-yellow-400 text-amber-950 font-black text-[10.5px] p-1 px-2.5 rounded-full border-2 border-[#92400E] shadow-md animate-bounce whitespace-nowrap z-20">
+                  <span className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-yellow-400 text-amber-950 font-black text-[9px] p-0.5 px-2 rounded-full border-2 border-[#92400E] shadow-md animate-bounce whitespace-nowrap z-20">
                     🏪 Жми! Лавка Семена
                   </span>
                 )}
@@ -3401,59 +3728,113 @@ export default function App() {
                     top: `${bld.y}%`,
                     transform: "translate(-50%, -100%)",
                   }}
-                  title={`${bld.nameRu}: ${bld.benefitRu}`}
                   id={`pasture-bld-${bld.id}`}
                 >
                   <div className="absolute bottom-0 w-20 h-5 bg-black/10 rounded-full blur-[2px] -z-10 group-hover:bg-black/20 transition-all duration-300" />
                   {bld.id === "max_house" ? (
                     <div className="flex flex-col items-center text-center drop-shadow-md relative">
-                      <span className="text-7xl md:text-8xl select-none transform hover:scale-110 active:scale-95 transition-transform duration-300 hover:rotate-2 cursor-pointer pointer-events-auto"
-                        onClick={(e) => {
+                      <span
+                        className="text-7xl md:text-8xl select-none transform hover:scale-110 active:scale-95 transition-transform duration-300 hover:rotate-2 cursor-pointer pointer-events-auto touch-none"
+                        onPointerDown={(e) => {
                           e.stopPropagation();
-                          playClickSound();
-                          if (e.shiftKey) {
-                            const currentLvl = gameState.maxHouseLevel || 1;
-                            const upgradeCost = currentLvl * 300;
-                            if (gameState.coins >= upgradeCost) {
-                              setGameState(prev => ({
-                                ...prev,
-                                coins: prev.coins - upgradeCost,
-                                maxHouseLevel: currentLvl + 1
-                              }));
-                              playLevelUpSound();
-                              triggerNotification(`🎉 Дом Макса улучшен до уровня ${currentLvl + 1}!`);
-                              spawnFloatHeart(bld.x, bld.y - 12, "👑");
-                            } else {
-                              playSadSound();
-                              triggerNotification(`⚠️ Нужно ${upgradeCost} монет для улучшения!`);
-                            }
-                            return;
-                          }
-                          if (!isInteriorZone(activeZone)) specialReturnZoneRef.current = activeZone;
-                          onSelectZoneWithLock("MAX_HOME");
+                          beginLongPress(
+                            e.pointerId,
+                            "max-house",
+                            e.clientX,
+                            e.clientY,
+                            () => showBuildingInfo(
+                              bld.nameRu,
+                              `Коснись — войти. Двойной тап — улучшить (Ур. ${gameState.maxHouseLevel || 1}).`,
+                              bld.id,
+                              e.pointerType
+                            ),
+                            { pointerType: e.pointerType }
+                          );
+                        }}
+                        onPointerUp={(e) => handleMaxHousePointerUp(e, bld.x, bld.y)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          showBuildingInfo(
+                            bld.nameRu,
+                            `Коснись — войти. Двойной тап — улучшить (Ур. ${gameState.maxHouseLevel || 1}).`,
+                            bld.id,
+                            "mouse"
+                          );
                         }}
                       >
                         {(gameState.maxHouseLevel || 1) === 1 ? "🛖" : (gameState.maxHouseLevel || 1) === 2 ? "🏡" : (gameState.maxHouseLevel || 1) === 3 ? "🧱" : (gameState.maxHouseLevel || 1) === 4 ? "🏰" : "🏰👑"}
                       </span>
-                      <div className="bg-[#5C3A21] border-2 border-[#FEF3C7] text-[9px] font-black text-[#FEF3C7] uppercase px-2 py-0.5 rounded-full shadow-md mt-1 scale-90 whitespace-nowrap pointer-events-auto cursor-pointer"
-                        onClick={(e) => {
+                      <div
+                        className="bg-[#5C3A21] border-2 border-[#FEF3C7] text-[9px] font-black text-[#FEF3C7] uppercase px-2 py-0.5 rounded-full shadow-md mt-1 scale-90 whitespace-nowrap pointer-events-auto cursor-pointer touch-none"
+                        onPointerUp={(e) => {
                           e.stopPropagation();
-                          playClickSound();
-                          triggerNotification(`🏡 Кликни на дом — войти внутрь! Shift+клик — улучшить (Ур. ${gameState.maxHouseLevel || 1})`);
+                          showBuildingInfo(
+                            bld.nameRu,
+                            `Коснись — войти. Двойной тап на дом — улучшить (Ур. ${gameState.maxHouseLevel || 1}).`,
+                            bld.id,
+                            e.pointerType
+                          );
                         }}
                       >
                         🏡 {bld.nameRu} (Ур. {gameState.maxHouseLevel || 1})
                       </div>
                     </div>
                   ) : bld.id === "garden_scarecrow" ? (
-                    <div className="flex flex-col items-center text-center drop-shadow-md cursor-help pointer-events-auto">
+                    <div
+                      className="flex flex-col items-center text-center drop-shadow-md cursor-pointer pointer-events-auto touch-none"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        beginLongPress(
+                          e.pointerId,
+                          bld.id,
+                          e.clientX,
+                          e.clientY,
+                          () => showBuildingInfo(bld.nameRu, bld.benefitRu, bld.id, e.pointerType),
+                          { pointerType: e.pointerType }
+                        );
+                      }}
+                      onPointerUp={(e) => {
+                        e.stopPropagation();
+                        if (endLongPress(e.pointerId).wasLongPress) return;
+                        showBuildingInfo(bld.nameRu, bld.benefitRu, bld.id, e.pointerType);
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        showBuildingInfo(bld.nameRu, bld.benefitRu, bld.id, "mouse");
+                      }}
+                    >
                       <ScarecrowSVG className="w-24 h-32 md:w-28 md:h-36 filter drop-shadow-lg hover:scale-105 transition-transform" />
                       <div className="bg-[#5C3A21] border-2 border-[#FEF3C7] text-[8px] font-black text-[#FEF3C7] uppercase px-2 py-0.5 rounded-full shadow-md mt-1 scale-90 whitespace-nowrap">
                         🌾 {bld.nameRu}
                       </div>
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center text-center drop-shadow-md cursor-help pointer-events-auto">
+                    <div
+                      className="flex flex-col items-center text-center drop-shadow-md cursor-pointer pointer-events-auto touch-none"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        beginLongPress(
+                          e.pointerId,
+                          bld.id,
+                          e.clientX,
+                          e.clientY,
+                          () => showBuildingInfo(bld.nameRu, bld.benefitRu, bld.id, e.pointerType),
+                          { pointerType: e.pointerType }
+                        );
+                      }}
+                      onPointerUp={(e) => {
+                        e.stopPropagation();
+                        if (endLongPress(e.pointerId).wasLongPress) return;
+                        showBuildingInfo(bld.nameRu, bld.benefitRu, bld.id, e.pointerType);
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        showBuildingInfo(bld.nameRu, bld.benefitRu, bld.id, "mouse");
+                      }}
+                    >
                       <span className="text-6xl md:text-7xl select-none transform hover:scale-110 active:scale-95 transition-transform duration-300 hover:rotate-2">
                         {bld.emoji}
                       </span>
@@ -3600,8 +3981,8 @@ export default function App() {
               return (
                 <button
                   key={animal.id}
-                  onMouseDown={(e) => handleAnimalStartDrag(e, animal.id, animal.species)}
-                  onTouchStart={(e) => handleAnimalStartDrag(e, animal.id, animal.species)}
+                  type="button"
+                  onPointerDown={(e) => handleAnimalPointerDown(e, animal.id, animal.species)}
                   className={`absolute w-24 h-24 origin-bottom select-none z-10 interactive-element touch-none ${
                     isDragged
                       ? "transition-none scale-135 filter drop-shadow-[0_12px_12px_rgba(251,191,36,0.95)] brightness-110 z-50 cursor-grabbing"
@@ -3810,19 +4191,23 @@ export default function App() {
               const dir = pos ? pos.dir : "right";
               const actionLabel = pos ? pos.actionLabel : undefined;
 
+              const isDragged = draggedWorkerId === worker.id;
+              const tossAngle = pos?.angle ?? 0;
+
               return (
-                <div
+                <button
                   key={worker.id}
-                  className="absolute w-16 h-18 z-20 pointer-events-auto cursor-pointer select-none transition-all duration-[40ms]"
+                  type="button"
+                  onPointerDown={(e) => handleWorkerPointerDown(e, worker.id)}
+                  className={`absolute w-16 h-18 z-20 pointer-events-auto cursor-pointer select-none interactive-element touch-none transition-all duration-[40ms] ${
+                    isDragged
+                      ? "scale-125 brightness-110 z-50 cursor-grabbing filter drop-shadow-[0_12px_12px_rgba(251,191,36,0.95)]"
+                      : ""
+                  }`}
                   style={{
                     left: `${posX}%`,
                     top: `${posY}%`,
-                    transform: `translate(-50%, -100%) scaleX(${dir === "left" ? -1 : 1})`
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    unlockAudio();
-                    playNpcClickSound(worker.id);
+                    transform: `translate(-50%, -100%) scaleX(${dir === "left" ? -1 : 1}) rotate(${tossAngle}deg)`
                   }}
                 >
                   <div className={`relative flex flex-col items-center ${isMoving ? "animate-walk-wobble" : ""}`}>
@@ -3847,7 +4232,7 @@ export default function App() {
                     {/* Ground shadow for physical depth */}
                     <div className="absolute bottom-[-2px] bg-black/15 w-8 h-2 rounded-full filter blur-[1px]" />
                   </div>
-                </div>
+                </button>
               );
             })}
 
@@ -4265,7 +4650,7 @@ export default function App() {
       {/* TODDLER-FRIENDLY POPUP OVERLAY SHOP MODAL (No giant menus at the bottom!) */}
       {showShopModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-2 lg:p-4 animate-fade-in" id="shop-modal-panel">
-          <div className="bg-[#FFFCEF] border-4 lg:border-8 border-[#6B3F23] rounded-2xl lg:rounded-[42px] p-3 lg:p-6 shadow-2xl max-w-[min(92vw,360px)] lg:max-w-2xl w-full relative max-h-[80vh] lg:max-h-[92vh] overflow-y-auto animate-scale-up" id="merchant-nearby-drawer">
+          <div className="bg-[#FFFCEF] border-4 lg:border-6 border-[#6B3F23] rounded-2xl lg:rounded-3xl p-2 lg:p-4 shadow-2xl max-w-[min(88vw,300px)] lg:max-w-xl w-full relative max-h-[72vh] lg:max-h-[85vh] overflow-y-auto animate-scale-up" id="merchant-nearby-drawer">
             {/* Close Shop Button */}
             <button
               onClick={() => { playClickSound(); setShowShopModal(false); }}
@@ -4275,10 +4660,10 @@ export default function App() {
             </button>
 
             {/* Shop Header */}
-            <div className="text-center mb-2 lg:mb-4 border-b-2 lg:border-b-4 border-dashed border-[#6B3F23]/25 pb-2 lg:pb-3">
-              <span className="text-3xl lg:text-5xl select-none">🏪</span>
-              <h2 className="text-lg lg:text-2xl font-black text-[#6B3F23] mt-0.5 lg:mt-1">Рынок купца Семена</h2>
-              <p className="text-[10px] lg:text-xs text-amber-800 font-bold">Веселый и мирный обмен без забоя животных! 🌸</p>
+            <div className="text-center mb-1.5 lg:mb-3 border-b-2 border-dashed border-[#6B3F23]/25 pb-1.5 lg:pb-2">
+              <span className="text-2xl lg:text-4xl select-none">🏪</span>
+              <h2 className="text-base lg:text-xl font-black text-[#6B3F23] mt-0.5">Рынок купца Семена</h2>
+              <p className="text-[9px] lg:text-[11px] text-amber-800 font-bold">Веселый и мирный обмен без забоя животных! 🌸</p>
             </div>
 
              {/* Central big category tabs */}
@@ -4799,6 +5184,8 @@ export default function App() {
           <span>{customNotification}</span>
         </div>
       )}
+
+      <InputDebugOverlay />
     </div>
   );
 }

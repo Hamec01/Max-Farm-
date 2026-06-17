@@ -1,20 +1,111 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Ферма Макса (Max Farm)
 
-# Run and deploy your AI Studio app
+Добрая 2D-ферма для детей — игра в браузере на телефоне, планшете и ПК.
 
-This contains everything you need to run your app locally.
+## Сохранения
 
-View your app in AI Studio: https://ai.studio/apps/530ba2dc-ce8a-4bb2-a423-1d293c66298a
+Прогресс хранится **только в браузере** (`localStorage` на этом устройстве).  
+**Нет регистрации и облачной базы.** Если закрыть вкладку, обновить страницу или очистить данные браузера — прогресс может пропасть.
 
-## Run Locally
+---
 
-**Prerequisites:**  Node.js
+## Запуск локально
 
+**Нужно:** Node.js 18 или новее.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+npm install
+npm run dev
+```
+
+Откройте в браузере: [http://localhost:5173](http://localhost:5173)
+
+Проверка на телефоне в той же Wi‑Fi сети:
+
+1. Узнайте IP компьютера (например `192.168.1.42`).
+2. На телефоне откройте: `http://192.168.1.42:5173`
+
+---
+
+## Сборка
+
+```bash
+npm install
+npm run build
+```
+
+Готовые файлы появятся в папке `dist/`.
+
+Проверка production-сборки локально:
+
+```bash
+npm run preview
+```
+
+Откройте: [http://localhost:4173](http://localhost:4173)
+
+---
+
+## Деплой (публичная ссылка)
+
+Проект — статический SPA (Vite + React). Подходит **Vercel** и **Netlify**.
+
+### Vercel
+
+1. Залейте репозиторий на GitHub.
+2. [vercel.com](https://vercel.com) → **Add New Project** → импорт репозитория.
+3. Настройки по умолчанию:
+   - **Build Command:** `npm run build`
+   - **Output Directory:** `dist`
+4. Deploy. Ссылка вида `https://ваш-проект.vercel.app`.
+
+Файл `vercel.json` уже настроен: при обновлении страницы игра не ломается (fallback на `index.html`).
+
+### Netlify
+
+1. [netlify.com](https://netlify.com) → **Add new site** → **Import from Git**.
+2. Настройки (или из `netlify.toml`):
+   - **Build command:** `npm run build`
+   - **Publish directory:** `dist`
+3. Deploy. Ссылка вида `https://ваш-проект.netlify.app`.
+
+### Ручной деплой (любой хостинг статики)
+
+```bash
+npm run build
+```
+
+Загрузите содержимое папки `dist/` на хостинг. Для SPA включите правило: все пути → `index.html` (код 200).
+
+---
+
+## Открыть на телефоне / планшете
+
+После деплоя просто откройте публичную ссылку в браузере:
+
+- **iPhone / iPad:** Safari (рекомендуется) или Chrome
+- **Android:** Chrome
+- **ПК:** Chrome, Edge, Firefox
+
+На iOS можно добавить на главный экран: **Поделиться → На экран «Домой»** — игра откроется как приложение.
+
+---
+
+## Управление
+
+- **Тап** — выбрать, пойти, взаимодействовать
+- **Долгое нажатие** — дополнительное действие (как правый клик на ПК)
+- **Двойной тап** — быстрое действие (как Shift+клик на ПК)
+- **Зажать и потянуть** — перетащить / подбросить животное или NPC
+- **Стрелки / WASD** — движение на клавиатуре (ПК)
+
+---
+
+## Скрипты
+
+| Команда | Описание |
+|---------|----------|
+| `npm run dev` | Dev-сервер с hot reload |
+| `npm run build` | Проверка TypeScript + сборка в `dist/` |
+| `npm run preview` | Локальный просмотр production-сборки |
+| `npm run lint` | Проверка типов TypeScript |
