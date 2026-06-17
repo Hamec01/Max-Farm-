@@ -653,90 +653,75 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
     case AnimalSpecies.CAT:
       return (
         <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-cat">
-          <ellipse cx="50" cy="85" rx="22" ry="5" fill="#1E3A1E" opacity="0.25" />
-          {/* Tail */}
-          <path d="M 22 55 Q 10 40 18 28 A 4 4 0 0 1 24 33 Q 18 45 26 55" fill="#F97316" />
-          {/* Legs */}
-          <ellipse cx="36" cy="78" rx="5" ry="4" fill="#F97316" />
-          <ellipse cx="50" cy="78" rx="5" ry="4" fill="#F97316" />
-          <ellipse cx="64" cy="78" rx="5" ry="4" fill="#F97316" />
-          {/* Body */}
-          <ellipse cx="45" cy="62" rx="22" ry="16" fill="#F97316" />
-          {/* Orange Stripes */}
-          <path d="M 38 48 Q 42 50 40 55" stroke="#EA580C" strokeWidth="3" fill="none" strokeLinecap="round" />
-          <path d="M 45 46 Q 48 50 44 56" stroke="#EA580C" strokeWidth="3" fill="none" strokeLinecap="round" />
-          {/* Head */}
-          <circle cx="64" cy="44" r="14" fill="#F97316" />
-          {/* Ears */}
-          <polygon points="52,38 52,24 62,32" fill="#EA580C" />
-          <polygon points="76,38 76,24 66,32" fill="#EA580C" />
-          {/* Nose */}
-          <polygon points="64,44 67,42 63,42" fill="#FDA4AF" />
-          {/* Whiskers */}
-          <line x1="54" y1="45" x2="44" y2="43" stroke="#EA580C" strokeWidth="1.5" />
-          <line x1="54" y1="47" x2="45" y2="49" stroke="#EA580C" strokeWidth="1.5" />
-          <line x1="74" y1="45" x2="84" y2="43" stroke="#EA580C" strokeWidth="1.5" />
-          <line x1="74" y1="47" x2="83" y2="49" stroke="#EA580C" strokeWidth="1.5" />
-          {/* Eyes (Smiling happy lines, or round) */}
+          <ellipse cx="50" cy="85" rx="25" ry="6" fill="#1E3A1E" opacity="0.25" />
+          <path d="M 38 74 L 33 84 M 38 74 L 38 85 M 38 74 L 43 83" stroke="#EA580C" strokeWidth="3.5" strokeLinecap="round" />
+          <path d="M 58 74 L 53 84 M 58 74 L 58 85 M 58 74 L 63 83" stroke="#EA580C" strokeWidth="3.5" strokeLinecap="round" />
+          <path d="M 24 52 Q 14 42 18 32 Q 24 30 28 44" stroke="#F97316" strokeWidth="7" fill="none" strokeLinecap="round" />
+          <ellipse cx="46" cy="58" rx="26" ry="20" fill="#F97316" stroke="#EA580C" strokeWidth="1.5" />
+          <ellipse cx="44" cy="56" rx="16" ry="11" fill="#FB923C" opacity="0.45" />
+          <path d="M 34 48 Q 38 56 36 64" stroke="#EA580C" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+          <path d="M 42 46 Q 46 54 44 64" stroke="#EA580C" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+          {renderMudSplats()}
+          <circle cx="66" cy="42" r="15" fill="#F97316" stroke="#EA580C" strokeWidth="0.5" />
+          <polygon points="54,36 52,22 62,30" fill="#EA580C" />
+          <polygon points="78,36 80,22 70,30" fill="#EA580C" />
+          <polygon points="66,44 69,41 63,41" fill="#FDA4AF" />
+          <line x1="56" y1="43" x2="48" y2="41" stroke="#EA580C" strokeWidth="1.2" />
+          <line x1="56" y1="46" x2="49" y2="48" stroke="#EA580C" strokeWidth="1.2" />
+          <line x1="76" y1="43" x2="84" y2="41" stroke="#EA580C" strokeWidth="1.2" />
           {isSad ? (
-            <path d="M 56 38 L 60 41" stroke="#374151" strokeWidth="2.5" />
+            <g>
+              <path d="M 60 38 L 64 41" stroke="#1E293B" strokeWidth="3" strokeLinecap="round" />
+              <path d="M 72 38 L 68 41" stroke="#1E293B" strokeWidth="3" strokeLinecap="round" />
+            </g>
           ) : (
             <g>
-              {/* Sweet cat eyes */}
-              <circle cx="58" cy="38" r="3" fill="#111827" />
-              <circle cx="70" cy="38" r="3" fill="#111827" />
-              {/* Sparkle */}
-              <circle cx="59.2" cy="36.8" r="0.9" fill="#A7F3D0" /> {/* Emerald sheen */}
-              <circle cx="71.2" cy="36.8" r="0.9" fill="#A7F3D0" />
+              <circle cx="62" cy="38" r="3.5" fill="#1E293B" />
+              <circle cx="72" cy="38" r="3.5" fill="#1E293B" />
+              <circle cx="63" cy="36.5" r="1" fill="#FFFFFF" />
+              <circle cx="73" cy="36.5" r="1" fill="#FFFFFF" />
             </g>
           )}
-
-          {/* Happy Purr Waves or Blush */}
-          {happiness > 60 && <circle cx="53" cy="45" r="2.5" fill="#E11D48" opacity="0.65" />}
-          {happiness > 60 && <circle cx="74" cy="45" r="2.5" fill="#E11D48" opacity="0.65" />}
+          <g transform="translate(66, 48)">
+            {renderExpression()}
+          </g>
         </svg>
       );
 
     case AnimalSpecies.DOG:
       return (
         <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-dog">
-          <ellipse cx="50" cy="85" rx="24" ry="5" fill="#1E3A1E" opacity="0.25" />
-          {/* Tail (Wagging visual) */}
-          <path d="M 22 55 Q 12 45 15 36 Q 18 36 24 50" fill="#D97706" />
-          {/* Chubby legs */}
-          <ellipse cx="36" cy="78" rx="6" ry="4" fill="#F59E0B" />
-          <ellipse cx="50" cy="78" rx="6" ry="4" fill="#F59E0B" />
-          <ellipse cx="64" cy="78" rx="6" ry="4" fill="#F59E0B" />
-          {/* Body */}
-          <ellipse cx="45" cy="62" rx="22" ry="16" fill="#F59E0B" />
-          {/* Spot on body */}
-          <ellipse cx="44" cy="58" rx="8" ry="6" fill="#B45309" opacity="0.8" />
-          {/* Head */}
-          <circle cx="64" cy="44" r="14" fill="#F59E0B" />
-          {/* Spot over left eye */}
-          <ellipse cx="58" cy="40" rx="6" ry="7" fill="#B45309" opacity="0.8" />
-          {/* Floppy dog ears */}
-          <path d="M 54 34 Q 44 42 50 48 Z" fill="#B45309" />
-          <path d="M 74 34 Q 84 42 78 48 Z" fill="#D97706" />
-          {/* Cute Snout */}
-          <ellipse cx="68" cy="48" rx="5" ry="4" fill="#F1F5F9" />
-          <circle cx="68" cy="46" r="2" fill="#111827" />
-          {/* Red Guardian Collar */}
-          <path d="M 52 50 Q 58 54 62 48" stroke="#EF4444" strokeWidth="3" fill="none" strokeLinecap="round" />
-          <circle cx="58" cy="53" r="2.5" fill="#FBBF24" /> {/* Gold tag */}
-          {/* Eyes */}
+          <ellipse cx="50" cy="85" rx="26" ry="6" fill="#1E3A1E" opacity="0.25" />
+          <path d="M 40 74 L 35 84 M 40 74 L 40 85 M 40 74 L 45 83" stroke="#B45309" strokeWidth="3.5" strokeLinecap="round" />
+          <path d="M 60 74 L 55 84 M 60 74 L 60 85 M 60 74 L 65 83" stroke="#B45309" strokeWidth="3.5" strokeLinecap="round" />
+          <path d="M 22 54 Q 10 42 14 30 Q 20 28 26 44" stroke="#F59E0B" strokeWidth="8" fill="none" strokeLinecap="round" />
+          <ellipse cx="46" cy="58" rx="28" ry="21" fill="#F59E0B" stroke="#D97706" strokeWidth="1.5" />
+          <ellipse cx="44" cy="56" rx="14" ry="10" fill="#FBBF24" opacity="0.5" />
+          {renderMudSplats()}
+          <circle cx="68" cy="40" r="16" fill="#F59E0B" stroke="#D97706" strokeWidth="0.5" />
+          <path d="M 56 34 Q 48 42 54 52 Z" fill="#B45309" />
+          <path d="M 80 34 Q 88 42 82 52 Z" fill="#D97706" />
+          <ellipse cx="74" cy="46" rx="7" ry="6" fill="#F1F5F9" />
+          <ellipse cx="74" cy="44" rx="2.5" ry="2" fill="#111827" />
           {isSad ? (
-            <path d="M 58 36 L 62 38" stroke="#1F2937" strokeWidth="2.5" />
+            <g>
+              <path d="M 62 36 L 66 39" stroke="#1E293B" strokeWidth="3" strokeLinecap="round" />
+              <path d="M 74 36 L 70 39" stroke="#1E293B" strokeWidth="3" strokeLinecap="round" />
+            </g>
           ) : (
             <g>
-              <circle cx="58" cy="38" r="3" fill="#111827" />
-              <circle cx="70" cy="38" r="3" fill="#27272A" />
-              <circle cx="59.2" cy="36.8" r="0.9" fill="#FFFFFF" />
-              <circle cx="71.2" cy="36.8" r="0.9" fill="#FFFFFF" />
+              <circle cx="64" cy="36" r="3.5" fill="#1E293B" />
+              <circle cx="76" cy="36" r="3.5" fill="#1E293B" />
+              <circle cx="65" cy="34.5" r="1" fill="#FFFFFF" />
+              <circle cx="77" cy="34.5" r="1" fill="#FFFFFF" />
             </g>
           )}
-
-          {happiness > 50 && <path d="M 64 50 Q 64 54 68 50" stroke="#EF4444" strokeWidth="2.5" fill="none" />}
+          {!isSad && happiness > 50 && (
+            <path d="M 72 50 Q 76 56 80 50" stroke="#EF4444" strokeWidth="3" fill="none" strokeLinecap="round" />
+          )}
+          <g transform="translate(68, 50)">
+            {renderExpression()}
+          </g>
         </svg>
       );
 
@@ -802,10 +787,33 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
         <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-camel">
           <ellipse cx="50" cy="85" rx="28" ry="7" fill="#1E3A1E" opacity="0.25" />
           <ellipse cx="48" cy="62" rx="24" ry="17" fill="#D97706" stroke="#B45309" strokeWidth="2" />
-          {/* Humps */}
           <circle cx="38" cy="46" r="10" fill="#D97706" stroke="#B45309" strokeWidth="1.5" />
           <circle cx="58" cy="46" r="10" fill="#D97706" stroke="#B45309" strokeWidth="1.5" />
           <text x="48" y="60" textAnchor="middle" fontSize="42" dy=".35em">🐫</text>
+          {renderExpression()}
+        </svg>
+      );
+
+    case AnimalSpecies.PEACOCK:
+      return (
+        <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-peacock">
+          <ellipse cx="50" cy="85" rx="22" ry="5" fill="#1E3A1E" opacity="0.25" />
+          <ellipse cx="42" cy="58" rx="18" ry="14" fill="#1D4ED8" stroke="#1E3A8A" strokeWidth="1.5" />
+          <path d="M 58 50 Q 78 30 72 55 Q 68 70 58 62 Z" fill="#059669" stroke="#047857" strokeWidth="1" />
+          <circle cx="36" cy="48" r="8" fill="#2563EB" stroke="#1E40AF" strokeWidth="1.5" />
+          <text x="48" y="58" textAnchor="middle" fontSize="36" dy=".35em">🦚</text>
+          {renderExpression()}
+        </svg>
+      );
+
+    case AnimalSpecies.SWAN:
+      return (
+        <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-swan">
+          <ellipse cx="50" cy="85" rx="24" ry="6" fill="#1E3A1E" opacity="0.25" />
+          <ellipse cx="48" cy="62" rx="20" ry="15" fill="#FFFFFF" stroke="#E5E7EB" strokeWidth="2" />
+          <path d="M 58 48 Q 72 38 68 52" stroke="#F97316" strokeWidth="3" fill="none" strokeLinecap="round" />
+          <circle cx="36" cy="46" r="9" fill="#FFFFFF" stroke="#D1D5DB" strokeWidth="1.5" />
+          <text x="48" y="58" textAnchor="middle" fontSize="38" dy=".35em">🦢</text>
           {renderExpression()}
         </svg>
       );

@@ -23,7 +23,9 @@ export enum AnimalSpecies {
   PTERODACTYL = "PTERODACTYL",
   DIPLODOCUS = "DIPLODOCUS",
   FENNEC = "FENNEC",
-  CAMEL = "CAMEL"
+  CAMEL = "CAMEL",
+  PEACOCK = "PEACOCK",
+  SWAN = "SWAN"
 }
 
 export interface AnimalConfig {
@@ -61,6 +63,7 @@ export interface AnimalInstance {
   groundY?: number; // physical ground target
   angle?: number; // rotation angle for flying flips
   locationId?: LocationId; // location where this animal resides
+  penId?: string; // assigned enclosure — stays inside when gate is closed
 }
 
 export type CropType = "WHEAT" | "CARROT" | "CLOVER" | "CABBAGE" | "RASPBERRY_BUSH" | "BLUEBERRY_BUSH";
@@ -105,7 +108,18 @@ export interface TreeInstance {
   timeRemaining: number;
 }
 
-export type LocationId = "MEADOW" | "BARNYARD" | "LAKESIDE" | "ORCHARD" | "DESERT" | "FOREST" | "LAKE";
+export type LocationId =
+  | "MEADOW"
+  | "BARNYARD"
+  | "MAX_HOME"
+  | "GARDEN"
+  | "LAKESIDE"
+  | "ORCHARD"
+  | "DESERT"
+  | "FOREST"
+  | "LAKE"
+  | "HILLS"
+  | "VALLEY";
 
 export interface LocationConfig {
   id: LocationId;
@@ -146,6 +160,49 @@ export interface WorkerInstance {
   color: string;
   statusText: string;
   assignedLocationId?: LocationId;
+  /** Идёт в комплекте с домом — не нанимается и не получает зарплату */
+  isBundledWithHome?: boolean;
+}
+
+export type PenType =
+  | "CHICKEN"
+  | "RABBIT"
+  | "SHEEP"
+  | "PIG"
+  | "COW"
+  | "HORSE"
+  | "PET"
+  | "DINOSAUR"
+  | "WATER"
+  | "DESERT"
+  | "UNIVERSAL";
+
+export interface PenTemplate {
+  id: string;
+  nameRu: string;
+  penType: PenType;
+  cost: number;
+  minLevel: number;
+  locationId: LocationId;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PenState {
+  templateId: string;
+  isOwned: boolean;
+  isOpen: boolean;
+}
+
+export interface PondFish {
+  id: string;
+  x: number;
+  y: number;
+  emoji: string;
+  vx: number;
+  vy: number;
 }
 
 export interface BuildingConfig {
@@ -174,6 +231,7 @@ export interface PlayerState {
   stats: GameStats;
   buildings?: Record<string, string[]>; // { MEADOW: ["barnyard_house"] }
   workers?: WorkerInstance[]; // hireable helper worker units
+  pens?: PenState[];
   maxHouseLevel?: number; // Level of Max's house
   day?: number; // current gameplay day
   dayProgress?: number; // current ticks elapsed in this day

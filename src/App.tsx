@@ -34,16 +34,44 @@ import {
   updateBackgroundMusic,
 } from "./lib/soundManager";
 import { useGameViewport } from "./hooks/useGameViewport";
+import {
+  separateAnimalsByLocation,
+  wanderAnimalAvoidingOthers,
+  findAnimalSpawnPosition,
+} from "./lib/animalSpacing";
+import {
+  applyPenConstraints,
+  findPenAtPoint,
+  canSpeciesUsePen,
+  getPenTemplate,
+  herdAnimalTowardPen,
+  isAnimalInsidePen,
+  getPenTypeEmoji,
+  getPenTypeLabel,
+  LAKESIDE_POND,
+} from "./lib/penLogic";
+import { PEN_TEMPLATES } from "./data/pens";
+import { GARDEN_PLOT_COORDS, GARDEN_ROW_Y } from "./data/gardenPlots";
+import {
+  getPlantingCropOrder,
+  plantOneEmptyGardenPlot,
+  waterOneDryGardenPlot,
+  harvestOneRipeGardenPlot,
+  resolveAnimalFood,
+  GARDEN_PLOT_IDS,
+} from "./lib/farmAutomation";
+import { pickWorkerTravelZone, randomSpotInZone, ZONE_TRAVEL_LABEL } from "./lib/workerTravel";
+import { WORLD_ZONES, isInteriorZone } from "./data/locations";
+import { WorkerSVG } from "./components/WorkerSVG";
+import { ScarecrowSVG } from "./components/ScarecrowSVG";
+import { MaxHomeInterior } from "./components/MaxHomeInterior";
+import { MaxHomeShop } from "./components/MaxHomeShop";
+import { MAX_HOME_FURNITURE } from "./data/maxHomeFurniture";
+import { LocationMapModal } from "./components/LocationMapModal";
+import { PondFish } from "./types";
 import { Sparkles, Trophy, Sprout, Heart, MapPin, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, BookOpen, ShoppingBag, Coins, RefreshCw, Star, Trash2 } from "lucide-react";
 
-interface FishInstance {
-  id: string;
-  x: number;
-  y: number;
-  type: string;
-  emoji: string;
-  vx: number;
-  vy: number;
+interface FishInstance extends PondFish {
   scaleX: number;
 }
 
@@ -52,75 +80,24 @@ const PLOT_COSTS: Record<string, number> = {
   plot6: 200,
   plot7: 320,
   plot8: 480,
+  plot9: 650,
+  plot10: 850,
+  plot11: 1100,
+  plot12: 1400,
+  plot13: 1700,
+  plot14: 2000,
+  plot15: 2350,
+  plot16: 2700,
+  plot17: 3100,
+  plot18: 3500,
+  plot19: 3950,
+  plot20: 4400,
+  plot21: 4900,
+  plot22: 5400,
+  plot23: 5900,
+  plot24: 6500,
 };
-const ALL_PLOT_IDS = ["plot1", "plot2", "plot3", "plot4", "plot5", "plot6", "plot7", "plot8"];
-
-const ZONES_ORDER: LocationId[] = ["MEADOW", "BARNYARD", "LAKESIDE", "ORCHARD", "DESERT", "FOREST", "LAKE"];
-
-/** Какие культуры можно посадить на грядке (не яблоки/молоко — они с деревьев и доения) */
-const PLANTABLE_CROP_CHOICES: { crop: CropType; seed: string; cost: number }[] = (
-  Object.keys(CROPS_CONFIG) as CropType[]
-).map((crop) => ({
-  crop,
-  seed: `${crop}_SEED`,
-  cost: CROPS_CONFIG[crop].seedCost,
-}));
-
-/** Список культур, которые нужны животным, от самых дефицитных в инвентаре */
-function getPrioritizedNeededCrops(
-  animals: AnimalInstance[],
-  inventory: Record<string, number>
-): CropType[] {
-  const needCount = new Map<CropType, number>();
-
-  animals.forEach((animal) => {
-    const config = ANIMAL_TEMPLATES[animal.species];
-    const food = config.foodType;
-    if (!(food in CROPS_CONFIG)) return;
-    const crop = food as CropType;
-    needCount.set(crop, (needCount.get(crop) || 0) + 1);
-  });
-
-  if (needCount.size === 0) return [];
-
-  return [...needCount.entries()]
-    .sort((a, b) => {
-      const invA = inventory[a[0]] || 0;
-      const invB = inventory[b[0]] || 0;
-      if (invA !== invB) return invA - invB;
-      // Голодные животные важнее
-      const hungryA = animals.filter(
-        (an) => !an.isFed && ANIMAL_TEMPLATES[an.species].foodType === a[0]
-      ).length;
-      const hungryB = animals.filter(
-        (an) => !an.isFed && ANIMAL_TEMPLATES[an.species].foodType === b[0]
-      ).length;
-      if (hungryA !== hungryB) return hungryB - hungryA;
-      return b[1] - a[1];
-    })
-    .map(([crop]) => crop);
-}
-
-/** Выбрать семена: сначала из рюкзака, иначе купить нужную культуру (не пшеницу по умолчанию) */
-function pickCropSeedForWorker(
-  prioritizedCrops: CropType[],
-  inventory: Record<string, number>,
-  coins: number
-): { crop: CropType; seed: string; fromInventory: boolean; cost: number } | null {
-  for (const crop of prioritizedCrops) {
-    const seed = `${crop}_SEED`;
-    if ((inventory[seed] || 0) > 0) {
-      return { crop, seed, fromInventory: true, cost: 0 };
-    }
-  }
-  for (const crop of prioritizedCrops) {
-    const choice = PLANTABLE_CROP_CHOICES.find((c) => c.crop === crop);
-    if (choice && coins >= choice.cost) {
-      return { crop, seed: choice.seed, fromInventory: false, cost: choice.cost };
-    }
-  }
-  return null;
-}
+const ALL_PLOT_IDS = GARDEN_PLOT_IDS;
 
 export default function App() {
   const { zoomScale, viewportHeightPx, deviceKind } = useGameViewport();
@@ -135,7 +112,9 @@ export default function App() {
   const [selectedTreeId, setSelectedTreeId] = useState<string | null>(null);
   const [showShopModal, setShowShopModal] = useState<boolean>(false);
   const [isBagCollapsed, setIsBagCollapsed] = useState<boolean>(false);
-  const [shopActiveTab, setShopActiveTab] = useState<"sell" | "animals" | "upgrades" | "lands" | "workers">("sell");
+  const [shopActiveTab, setShopActiveTab] = useState<"sell" | "animals" | "upgrades" | "lands" | "workers" | "pens">("sell");
+  const [showMaxHomeShop, setShowMaxHomeShop] = useState<boolean>(false);
+  const [showLocationMap, setShowLocationMap] = useState<boolean>(false);
 
   const [workersPositions, setWorkersPositions] = useState<Record<string, {
     x: number;
@@ -146,36 +125,37 @@ export default function App() {
     dir: "left" | "right";
     actionLabel?: string;
     actionTimer: number;
+    currentZone: LocationId;
   }>>({
-    "worker-papa": { x: 25, y: 72, targetX: 25, targetY: 72, isMoving: false, dir: "right", actionTimer: 0 },
-    "worker-mama": { x: 38, y: 74, targetX: 38, targetY: 74, isMoving: false, dir: "right", actionTimer: 0 },
-    "worker-nadya": { x: 48, y: 76, targetX: 48, targetY: 76, isMoving: false, dir: "right", actionTimer: 0 },
-    "worker-lena": { x: 58, y: 78, targetX: 58, targetY: 78, isMoving: false, dir: "right", actionTimer: 0 },
-    "worker-pasha": { x: 68, y: 75, targetX: 68, targetY: 75, isMoving: false, dir: "right", actionTimer: 0 },
-    "worker-andrey": { x: 78, y: 73, targetX: 78, targetY: 73, isMoving: false, dir: "right", actionTimer: 0 },
-    "worker-dima": { x: 45, y: 71, targetX: 45, targetY: 71, isMoving: false, dir: "right", actionTimer: 0 },
-    "worker-arina": { x: 82, y: 74, targetX: 82, targetY: 74, isMoving: false, dir: "left", actionTimer: 0 },
-    "worker-sveta": { x: 35, y: 73, targetX: 35, targetY: 73, isMoving: false, dir: "right", actionTimer: 0 },
-    "worker-misha": { x: 42, y: 76, targetX: 42, targetY: 76, isMoving: false, dir: "right", actionTimer: 0 },
-    "worker-masha": { x: 55, y: 72, targetX: 55, targetY: 72, isMoving: false, dir: "right", actionTimer: 0 },
-    "worker-sergey": { x: 62, y: 75, targetX: 62, targetY: 75, isMoving: false, dir: "right", actionTimer: 0 },
+    "worker-papa": { x: 25, y: 72, targetX: 25, targetY: 72, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MEADOW" },
+    "worker-mama": { x: 38, y: 74, targetX: 38, targetY: 74, isMoving: false, dir: "right", actionTimer: 0, currentZone: "BARNYARD" },
+    "worker-nadya": { x: 48, y: 76, targetX: 48, targetY: 76, isMoving: false, dir: "right", actionTimer: 0, currentZone: "GARDEN" },
+    "worker-lena": { x: 58, y: 78, targetX: 58, targetY: 78, isMoving: false, dir: "right", actionTimer: 0, currentZone: "BARNYARD" },
+    "worker-pasha": { x: 68, y: 75, targetX: 68, targetY: 75, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MEADOW" },
+    "worker-andrey": { x: 78, y: 73, targetX: 78, targetY: 73, isMoving: false, dir: "right", actionTimer: 0, currentZone: "ORCHARD" },
+    "worker-dima": { x: LAKESIDE_POND.dockX, y: LAKESIDE_POND.dockY, targetX: LAKESIDE_POND.dockX, targetY: LAKESIDE_POND.dockY, isMoving: false, dir: "right", actionTimer: 0, currentZone: "LAKESIDE" },
+    "worker-arina": { x: 82, y: 74, targetX: 82, targetY: 74, isMoving: false, dir: "left", actionTimer: 0, currentZone: "LAKESIDE" },
+    "worker-sveta": { x: 35, y: 73, targetX: 35, targetY: 73, isMoving: false, dir: "right", actionTimer: 0, currentZone: "DESERT" },
+    "worker-misha": { x: 42, y: 76, targetX: 42, targetY: 76, isMoving: false, dir: "right", actionTimer: 0, currentZone: "FOREST" },
+    "worker-masha": { x: 55, y: 72, targetX: 55, targetY: 72, isMoving: false, dir: "right", actionTimer: 0, currentZone: "LAKE" },
+    "worker-sergey": { x: 62, y: 75, targetX: 62, targetY: 75, isMoving: false, dir: "right", actionTimer: 0, currentZone: "ORCHARD" },
+    "worker-pastuh": { x: 32, y: 73, targetX: 32, targetY: 73, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MEADOW" },
+    "worker-kolya": { x: 50, y: 76, targetX: 50, targetY: 76, isMoving: false, dir: "right", actionTimer: 0, currentZone: "GARDEN" },
+    "worker-vera": { x: 22, y: 58, targetX: 22, targetY: 58, isMoving: false, dir: "right", actionTimer: 0, currentZone: "GARDEN" },
+    "worker-fyodor": { x: 62, y: 66, targetX: 62, targetY: 66, isMoving: false, dir: "left", actionTimer: 0, currentZone: "GARDEN" },
+    "worker-sonya": { x: 38, y: 74, targetX: 38, targetY: 74, isMoving: false, dir: "right", actionTimer: 0, currentZone: "GARDEN" },
+    "worker-grisha": { x: 70, y: 50, targetX: 70, targetY: 50, isMoving: false, dir: "left", actionTimer: 0, currentZone: "GARDEN" },
+    "worker-nina": { x: 40, y: 72, targetX: 40, targetY: 72, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MEADOW" },
+    "worker-olya": { x: 55, y: 74, targetX: 55, targetY: 74, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MEADOW" },
+    "worker-vika": { x: 45, y: 76, targetX: 45, targetY: 76, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MEADOW" },
+    "worker-igor": { x: 38, y: 72, targetX: 38, targetY: 72, isMoving: false, dir: "right", actionTimer: 0, currentZone: "DESERT" },
+    "worker-tolya": { x: 52, y: 70, targetX: 52, targetY: 70, isMoving: false, dir: "right", actionTimer: 0, currentZone: "FOREST" },
+    "worker-zoya": { x: 48, y: 78, targetX: 48, targetY: 78, isMoving: false, dir: "right", actionTimer: 0, currentZone: "LAKE" },
+    "worker-roman": { x: 50, y: 68, targetX: 50, targetY: 68, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MAX_HOME" },
   });
 
-  const triggerWorkerActionFeedback = (workerId: string, x: number, y: number, label: string) => {
-    setWorkersPositions((prev) => {
-      const current = prev[workerId];
-      if (!current) return prev;
-      return {
-        ...prev,
-        [workerId]: {
-          ...current,
-          targetX: Math.max(5, Math.min(95, x)),
-          targetY: Math.max(30, Math.min(84, y)),
-          actionLabel: label,
-          actionTimer: 2000
-        }
-      };
-    });
+  const triggerWorkerActionFeedback = (_workerId: string, _x: number, _y: number, _label: string) => {
+    // NPC работают тихо — визуальные эффекты только у действий игрока
   };
 
   const [showHelp, setShowHelp] = useState<boolean>(() => {
@@ -184,12 +164,24 @@ export default function App() {
 
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [activeZone, setActiveZone] = useState<LocationId>("MEADOW");
+  const activeZoneRef = useRef(activeZone);
+  activeZoneRef.current = activeZone;
+  const workersRef = useRef(gameState.workers);
+  workersRef.current = gameState.workers;
+  const gameStateRef = useRef(gameState);
+  gameStateRef.current = gameState;
+  const workerZoneTickRef = useRef(0);
   const [customNotification, setCustomNotification] = useState<string | null>(null);
+  const specialReturnZoneRef = useRef<LocationId>("MEADOW");
 
-  // Kid-friendly Room/Room Transition helpers (all 7 locations, circular)
-  const currentZoneIndex = ZONES_ORDER.indexOf(activeZone);
-  const prevZone = ZONES_ORDER[(currentZoneIndex - 1 + ZONES_ORDER.length) % ZONES_ORDER.length];
-  const nextZone = ZONES_ORDER[(currentZoneIndex + 1) % ZONES_ORDER.length];
+  const isInterior = isInteriorZone(activeZone);
+  const worldZone = isInterior ? specialReturnZoneRef.current : activeZone;
+  const currentZoneIndex = WORLD_ZONES.indexOf(worldZone as (typeof WORLD_ZONES)[number]);
+  const prevZone = WORLD_ZONES[(currentZoneIndex - 1 + WORLD_ZONES.length) % WORLD_ZONES.length];
+  const nextZone = WORLD_ZONES[(currentZoneIndex + 1) % WORLD_ZONES.length];
+  const effectiveZoom =
+    activeZone === "MAX_HOME" ? zoomScale * 0.92
+    : zoomScale;
 
   // Character walking state
   const [boyPosition, setBoyPosition] = useState({
@@ -206,6 +198,7 @@ export default function App() {
   // 🦋 БАБОЧКИ И 🌠 ПАДАЮЩИЕ ЗВЕЗДЫ - REALTIME ENGINE:
   const [butterflies, setButterflies] = useState<Butterfly[]>([]);
   const [fallingStars, setFallingStars] = useState<FallingStar[]>([]);
+  const [pondFish, setPondFish] = useState<FishInstance[]>([]);
 
   // Инициализируем несколько стартовых красивых бабочек (теперь меньше и разные)
   useEffect(() => {
@@ -215,6 +208,24 @@ export default function App() {
     ];
     setButterflies(initialButterflies);
   }, []);
+
+  // Рыбки в пруду (озеро LAKESIDE)
+  useEffect(() => {
+    if (activeZone !== "LAKESIDE") return;
+    if (pondFish.length > 0) return;
+    const emojis = ["🐟", "🐠", "🎏"];
+    setPondFish(
+      emojis.map((emoji, i) => ({
+        id: `fish-${i}`,
+        x: 30 + i * 18,
+        y: 82 + (i % 2) * 3,
+        emoji,
+        vx: (Math.random() - 0.5) * 0.25,
+        vy: (Math.random() - 0.5) * 0.1,
+        scaleX: 1,
+      }))
+    );
+  }, [activeZone, pondFish.length]);
 
   // Высокочастотный таймер анимации бабочек и звезд (100мс)
   useEffect(() => {
@@ -257,6 +268,34 @@ export default function App() {
           };
         })
       );
+
+      // 1.5 Плавание рыбок в пруду
+      if (activeZone === "LAKESIDE") {
+        setPondFish((prev) =>
+          prev.map((f) => {
+            let nx = f.x + f.vx;
+            let ny = f.y + f.vy;
+            let nvx = f.vx;
+            let nvy = f.vy;
+            if (nx < LAKESIDE_POND.minX || nx > LAKESIDE_POND.maxX) {
+              nvx = -f.vx;
+              nx = Math.max(LAKESIDE_POND.minX, Math.min(LAKESIDE_POND.maxX, nx));
+            }
+            if (ny < LAKESIDE_POND.minY || ny > LAKESIDE_POND.maxY) {
+              nvy = -f.vy;
+              ny = Math.max(LAKESIDE_POND.minY, Math.min(LAKESIDE_POND.maxY, ny));
+            }
+            return {
+              ...f,
+              x: nx,
+              y: ny,
+              vx: nvx + (Math.random() - 0.5) * 0.04,
+              vy: nvy + (Math.random() - 0.5) * 0.03,
+              scaleX: nvx < 0 ? -1 : 1,
+            };
+          })
+        );
+      }
 
       // 2. Движение падающих звезд вниз к траве
       setFallingStars((prev) =>
@@ -320,7 +359,7 @@ export default function App() {
     }, 100);
 
     return () => clearInterval(timer);
-  }, [gameState.dayProgress]);
+  }, [gameState.dayProgress, activeZone]);
 
   // Сбор бабочки: за нее даются золотые монетки и опыт!
   const handleCollectButterfly = (id: string, e: React.MouseEvent) => {
@@ -469,7 +508,7 @@ export default function App() {
           currentDay += 1;
 
           // Check hired workers wages
-          const activeWorkers = updatedWorkers.filter((w) => w.isActive);
+          const activeWorkers = updatedWorkers.filter((w) => w.isActive && !w.isBundledWithHome);
           const totalWage = activeWorkers.reduce((acc, curr) => acc + curr.dailyWage, 0);
 
           if (totalWage > 0) {
@@ -480,7 +519,7 @@ export default function App() {
             } else {
               // Dismiss workers who aren't paid
               updatedWorkers = updatedWorkers.map((w) => {
-                if (w.isActive) {
+                if (w.isActive && !w.isBundledWithHome) {
                   return {
                     ...w,
                     isActive: false,
@@ -509,18 +548,63 @@ export default function App() {
           }, 100);
         }
 
-        // --- 1. Tick Crops Growth (Meadow, Barnyard, Lakeside show crops) ---
+        // --- 1. Tick Crops Growth (all plots live on the Garden) ---
         const updatedCrops = { ...prev.crops };
+        const dripLvl = prev.upgrades["dripIrrigation"] || 0;
+        const hasScarecrow = prev.buildings?.GARDEN?.includes("garden_scarecrow");
+        const hasAutoSprinkler = prev.buildings?.GARDEN?.includes("garden_autowater");
+        if (dripLvl > 0) {
+          let autoWatered = 0;
+          Object.keys(updatedCrops).forEach((plotId) => {
+            const crop = updatedCrops[plotId];
+            if (
+              crop &&
+              crop.progress > 0 &&
+              crop.progress < 100 &&
+              !crop.isWatered &&
+              autoWatered < dripLvl * 2
+            ) {
+              crop.isWatered = true;
+              autoWatered += 1;
+            }
+          });
+        }
+        if (hasAutoSprinkler) {
+          let sprinklerCount = 0;
+          Object.keys(updatedCrops).forEach((plotId) => {
+            const crop = updatedCrops[plotId];
+            if (
+              crop &&
+              crop.progress > 0 &&
+              crop.progress < 100 &&
+              !crop.isWatered &&
+              sprinklerCount < 5
+            ) {
+              crop.isWatered = true;
+              sprinklerCount += 1;
+            }
+          });
+        }
+        if (hasScarecrow) {
+          Object.keys(updatedCrops).forEach((plotId) => {
+            const crop = updatedCrops[plotId];
+            if (crop && crop.progress > 0 && crop.progress < 100 && !crop.isWatered) {
+              crop.isWatered = true;
+            }
+          });
+        }
         Object.keys(updatedCrops).forEach((plotId) => {
           const crop = updatedCrops[plotId];
           if (crop && crop.progress > 0 && crop.progress < 100) {
             const config = CROPS_CONFIG[crop.type];
             const spadeLvl = prev.upgrades["goldenSpade"] || 1;
+            const greenhouseLvl = prev.upgrades["gardenGreenhouse"] || 0;
             const spadeSpeedMultiplier = 1 + (spadeLvl - 1) * 0.15;
+            const greenhouseMultiplier = 1 + greenhouseLvl * 0.12;
             
             // Crops grow only if they are watered
             if (crop.isWatered) {
-              const secondsElapsed = 1 * spadeSpeedMultiplier;
+              const secondsElapsed = 1 * spadeSpeedMultiplier * greenhouseMultiplier;
               const totalGrowSeconds = config.growTime;
               const addedProgress = (secondsElapsed / totalGrowSeconds) * 100;
               crop.progress = Math.min(crop.progress + addedProgress, 100);
@@ -607,131 +691,55 @@ export default function App() {
         const isShepherdHired = updatedWorkers.find(w => w.id === "worker-misha")?.isActive;
         const isStargazerHired = updatedWorkers.find(w => w.id === "worker-masha")?.isActive;
         const isHandymanHired = updatedWorkers.find(w => w.id === "worker-sergey")?.isActive;
+        const isPastuhHired = updatedWorkers.find(w => w.id === "worker-pastuh")?.isActive;
+        const isKolyaHired = updatedWorkers.find(w => w.id === "worker-kolya")?.isActive;
+        const isVeraHired = updatedWorkers.find(w => w.id === "worker-vera")?.isActive;
+        const isFyodorHired = updatedWorkers.find(w => w.id === "worker-fyodor")?.isActive;
+        const isSonyaHired = updatedWorkers.find(w => w.id === "worker-sonya")?.isActive;
+        const isGrishaHired = updatedWorkers.find(w => w.id === "worker-grisha")?.isActive;
+        const isNinaHired = updatedWorkers.find(w => w.id === "worker-nina")?.isActive;
+        const isOlyaHired = updatedWorkers.find(w => w.id === "worker-olya")?.isActive;
+        const isVikaHired = updatedWorkers.find(w => w.id === "worker-vika")?.isActive;
+        const isIgorHired = updatedWorkers.find(w => w.id === "worker-igor")?.isActive;
+        const isTolyaHired = updatedWorkers.find(w => w.id === "worker-tolya")?.isActive;
+        const isZoyaHired = updatedWorkers.find(w => w.id === "worker-zoya")?.isActive;
+        const isRomanHired = true; // Роман-домовой всегда с домом
 
-        // A. 👨‍🌾 Дядя Ваня (FEED WORKER) - feeds 1 hungry animal max per second
+        const plantingCropOrder = getPlantingCropOrder(prev.animals || [], updatedInventory);
+        const compostLvl = prev.upgrades["richCompost"] || 0;
+        const feederLvl = prev.upgrades["autoFeeder"] || 1;
+        const autoFeederMultiplier = 1 + (feederLvl - 1) * 0.20;
+
+        // A. 👩‍🍳 Мама Женя — кормит всех голодных, у кого есть еда в рюкзаке
         if (isFeedHired) {
-          let hasFedOne = false;
           updatedAnimals = updatedAnimals.map((animal) => {
-            if (!animal.isFed && !hasFedOne) {
-              const config = ANIMAL_TEMPLATES[animal.species];
-              const foodType = config.foodType;
-              let hasFood = (updatedInventory[foodType] || 0) > 0;
-              let usedFoodKey = foodType;
+            if (animal.isFed) return animal;
+            const config = ANIMAL_TEMPLATES[animal.species];
+            const { hasFood, usedFoodKey } = resolveAnimalFood(updatedInventory, config.foodType);
+            if (!hasFood) return animal;
 
-              if (foodType === "MILK") {
-                if ((updatedInventory["MILK"] || 0) > 0) { usedFoodKey = "MILK"; hasFood = true; }
-                else if ((updatedInventory["Парное молоко"] || 0) > 0) { usedFoodKey = "Парное молоко"; hasFood = true; }
-                else if ((updatedInventory["Козье молоко"] || 0) > 0) { usedFoodKey = "Козье молоко"; hasFood = true; }
-              }
+            updatedInventory[usedFoodKey] = (updatedInventory[usedFoodKey] || 1) - 1;
+            statsFedAdd += 1;
+            totalXpEarned += 8;
 
-              if (hasFood) {
-                updatedInventory[usedFoodKey] = (updatedInventory[usedFoodKey] || 1) - 1;
-                hasFedOne = true;
-                statsFedAdd += 1;
-                totalXpEarned += 8;
-
-                const feederLvl = prev.upgrades["autoFeeder"] || 1;
-                const autoFeederMultiplier = 1 + (feederLvl - 1) * 0.20;
-
-                setTimeout(() => {
-                  playEatSound();
-                  spawnFloatHeart(animal.x, animal.y, "🍿");
-                  triggerWorkerActionFeedback("worker-mama", animal.x, animal.y, `🍿 Кормлю ${config.nameRu.split(" ")[0]}!`);
-                }, 40);
-
-                return {
-                  ...animal,
-                  isFed: true,
-                  fedTimeRemaining: Math.round(config.productionTime * 2 * autoFeederMultiplier),
-                  happiness: Math.min(animal.happiness + 20, 100)
-                };
-              }
-            }
-            return animal;
+            return {
+              ...animal,
+              isFed: true,
+              fedTimeRemaining: Math.round(config.productionTime * 2 * autoFeederMultiplier),
+              happiness: Math.min(animal.happiness + 20, 100),
+            };
           });
         }
 
-        // B. 👩‍🌾 Тётя Маша (GARDEN WORKER) - Waters, Seeds, and Harvests up to 1 plot respectively per second
+        // B. 👵🏻 Бабушка Надя — полив, посадка, сбор на огороде
         if (isGrowHired) {
-          // B1. Waters 1 dry growing plot
-          let waterCheck = false;
-          Object.keys(updatedCrops).forEach((plotId) => {
-            const crop = updatedCrops[plotId];
-            if (crop && crop.progress > 0 && crop.progress < 100 && !crop.isWatered && !waterCheck) {
-              crop.isWatered = true;
-              waterCheck = true;
-              setTimeout(() => {
-                spawnFloatHeart(40, 42, "💧");
-                const coords = getPlotsCoords(plotId);
-                if (coords) {
-                  triggerWorkerActionFeedback("worker-nadya", coords.x, coords.y, "💧 Поливаю!");
-                }
-              }, 40);
-            }
-          });
-
-          // B2. Сеет то, что нужно животным (не только пшеницу!)
-          let plantCheck = false;
-          const prioritizedCrops = getPrioritizedNeededCrops(prev.animals || [], updatedInventory);
-
-          Object.keys(updatedCrops).forEach((plotId) => {
-            const crop = updatedCrops[plotId];
-            if (crop && crop.progress === 0 && !plantCheck && prioritizedCrops.length > 0) {
-              const pick = pickCropSeedForWorker(prioritizedCrops, updatedInventory, nextCoins);
-              if (!pick) return;
-
-              updatedCrops[plotId] = {
-                id: plotId,
-                type: pick.crop,
-                progress: 2,
-                isWatered: true,
-                isDead: false,
-                timeRemaining: CROPS_CONFIG[pick.crop].growTime
-              };
-
-              if (pick.fromInventory) {
-                updatedInventory[pick.seed] = (updatedInventory[pick.seed] || 1) - 1;
-              } else {
-                nextCoins -= pick.cost;
-              }
-
-              plantCheck = true;
-              setTimeout(() => {
-                spawnFloatHeart(50, 42, "🌱");
-                const coords = getPlotsCoords(plotId);
-                if (coords) {
-                  triggerWorkerActionFeedback(
-                    "worker-nadya",
-                    coords.x,
-                    coords.y,
-                    `🌱 Сею ${CROPS_CONFIG[pick.crop].nameRu}!`
-                  );
-                }
-              }, 45);
-            }
-          });
-
-          // B3. Harvests 1 ripe crop
-          let harvestCheck = false;
-          Object.keys(updatedCrops).forEach((plotId) => {
-            const crop = updatedCrops[plotId];
-            if (crop && crop.progress >= 100 && !crop.isDead && !harvestCheck) {
-              const config = CROPS_CONFIG[crop.type];
-              updatedInventory[crop.type] = (updatedInventory[crop.type] || 0) + config.yieldCount;
-              crop.progress = 0;
-              crop.isWatered = false;
-              harvestCheck = true;
-              statsHarvestedAdd += 1;
-              totalXpEarned += 10;
-              setTimeout(() => {
-                spawnFloatHeart(45, 45, config.icon);
-                const coords = getPlotsCoords(plotId);
-                if (coords) {
-                  triggerWorkerActionFeedback("worker-nadya", coords.x, coords.y, `🧺 Сбор ${config.nameRu}!`);
-                }
-              }, 45);
-            }
-          });
+          waterOneDryGardenPlot(updatedCrops);
+          const planted = plantOneEmptyGardenPlot(updatedCrops, plantingCropOrder, updatedInventory, nextCoins);
+          if (planted.planted) nextCoins -= planted.coinsSpent;
+          if (harvestOneRipeGardenPlot(updatedCrops, updatedInventory, compostLvl)) {
+            statsHarvestedAdd += 1;
+            totalXpEarned += 10;
+          }
         }
 
         // C. 👦🏻 Озорной Вася (CLEANER WORKER) - Brushes, Gathers animal products & Orchard fruits
@@ -746,11 +754,7 @@ export default function App() {
               collectCheck = true;
               statsCollectedAdd += 1;
               totalXpEarned += 12;
-              setTimeout(() => {
-                playCoinSound();
-                spawnFloatHeart(animal.x, animal.y, config.productIcon);
-                triggerWorkerActionFeedback("worker-lena", animal.x, animal.y, `🧺 Сбор у ${config.nameRu.split(" ")[0]}!`);
-              }, 50);
+
               return {
                 ...animal,
                 productionProgress: 0
@@ -771,13 +775,7 @@ export default function App() {
               fruitCheck = true;
               statsCollectedAdd += 1;
               totalXpEarned += 15;
-              setTimeout(() => {
-                spawnFloatHeart(80, 50, config.icon);
-                const coords = getTreeCoords(treeId);
-                if (coords) {
-                  triggerWorkerActionFeedback("worker-lena", coords.x, coords.y, `🍎 Сбор ${config.fruitNameRu}!`);
-                }
-              }, 50);
+
             }
           });
 
@@ -790,10 +788,7 @@ export default function App() {
           updatedAnimals = updatedAnimals.map((animal) => {
             if ((animal.cleanliness < 70 || animal.happiness < 75) && !brushCheck) {
               brushCheck = true;
-              setTimeout(() => {
-                spawnFloatHeart(animal.x, animal.y, "🧼");
-                triggerWorkerActionFeedback("worker-pasha", animal.x, animal.y, `🧼 Чищу ${ANIMAL_TEMPLATES[animal.species].nameRu.split(" ")[0]}!`);
-              }, 40);
+
               return {
                 ...animal,
                 cleanliness: 100,
@@ -810,11 +805,7 @@ export default function App() {
           updatedAnimals = updatedAnimals.map((animal) => {
             if (animal.happiness < 85 && !petCheck) {
               petCheck = true;
-              setTimeout(() => {
-                playPetSound();
-                spawnFloatHeart(animal.x, animal.y, "❤️");
-                triggerWorkerActionFeedback("worker-papa", animal.x, animal.y, `❤️ Глажу ${animal.customName}!`);
-              }, 40);
+
               return {
                 ...animal,
                 happiness: Math.min(animal.happiness + 15, 100)
@@ -836,29 +827,16 @@ export default function App() {
                 tree.fruitProgress = 0;
               }
               treeCheck = true;
-              setTimeout(() => {
-                const coords = getTreeCoords(treeId);
-                if (coords) {
-                  triggerWorkerActionFeedback("worker-andrey", coords.x, coords.y, "🌳 Ухаживаю!");
-                }
-              }, 45);
+
             }
           });
         }
 
-        // G. 🧔🏻‍♂️ Дядя Дима (FISHER) - Catches fish for coins
+        // G. 🧔🏻‍♂️ Дядя Дима (FISHER) - Catches fish at the pond
         if (isFisherHired) {
-          let fishCheck = false;
-          if (!fishCheck) {
-            nextCoins += 6;
-            totalXpEarned += 4;
-            fishCheck = true;
-            setTimeout(() => {
-              playCoinSound();
-              spawnFloatHeart(50, 75, "🐟");
-              triggerWorkerActionFeedback("worker-dima", 50, 75, "🐟 Поймал рыбку!");
-            }, 50);
-          }
+          nextCoins += 6;
+          totalXpEarned += 4;
+
         }
 
         // H. 👩🏻‍💼 Тётя Арина (CLERK) - Organizes inventory for bonus XP
@@ -871,11 +849,7 @@ export default function App() {
           updatedInventory["WHEAT"] = (updatedInventory["WHEAT"] || 1) - 1;
           nextCoins += 12;
           totalXpEarned += 6;
-          setTimeout(() => {
-            playCoinSound();
-            spawnFloatHeart(40, 70, "🍞");
-            triggerWorkerActionFeedback("worker-sveta", 40, 70, "🍞 Пеку хлеб!");
-          }, 45);
+
         }
 
         // J. 👦🏻 Кузен Мишa (SHEPHERD) - Shears 1 ready sheep
@@ -893,11 +867,7 @@ export default function App() {
               updatedInventory[config.productName] = (updatedInventory[config.productName] || 0) + 1;
               statsCollectedAdd += 1;
               totalXpEarned += 12;
-              setTimeout(() => {
-                playShearSound();
-                spawnFloatHeart(animal.x, animal.y, "🧶");
-                triggerWorkerActionFeedback("worker-misha", animal.x, animal.y, "✂️ Стригу овечку!");
-              }, 50);
+
               return {
                 ...animal,
                 productionProgress: 0,
@@ -914,10 +884,7 @@ export default function App() {
         if (isStargazerHired && currentDayProgress >= 192) {
           nextCoins += 8;
           totalXpEarned += 8;
-          setTimeout(() => {
-            spawnFloatHeart(60, 30, "⭐");
-            triggerWorkerActionFeedback("worker-masha", 60, 30, "⭐ Звёздочка!");
-          }, 55);
+
         }
 
         // L. 🧑🏻‍🔧 Дядя Сергей (HANDYMAN) - Helps orchard + cheers animals
@@ -928,12 +895,7 @@ export default function App() {
             if (tree && tree.fruitCount < TREES_CONFIG[tree.type].yieldCount && !handymanTreeCheck) {
               tree.fruitProgress = Math.min(tree.fruitProgress + 8, 100);
               handymanTreeCheck = true;
-              setTimeout(() => {
-                const coords = getTreeCoords(treeId);
-                if (coords) {
-                  triggerWorkerActionFeedback("worker-sergey", coords.x, coords.y, "🔧 Чиню сад!");
-                }
-              }, 45);
+
             }
           });
           let cheerCheck = false;
@@ -946,85 +908,221 @@ export default function App() {
           });
         }
 
-        // --- 5. Animal dynamic wanders & sleeping shelter gathering ---
-        const isNightVal = currentDayProgress >= 192;
-        if (isNightVal) {
-          // At night, all animals slowly gather and walk towards their cozy sleep shelters!
-          const getSleepSpot = (loc: string) => {
-            if (loc === "MEADOW") return { x: 28, y: 74 };
-            if (loc === "BARNYARD") return { x: 28, y: 76 };
-            if (loc === "LAKESIDE") return { x: 24, y: 75 };
-            if (loc === "ORCHARD") return { x: 75, y: 74 };
-            if (loc === "DESERT") return { x: 30, y: 75 };
-            if (loc === "FOREST") return { x: 32, y: 73 };
-            return { x: 28, y: 75 }; // Default LAKE
-          };
+        // M. 🤠 Пастух Ваня — загоняет зверушек обратно в закрытый загон
+        if (isPastuhHired) {
+          const pensList = prev.pens || [];
+          updatedAnimals = updatedAnimals.map((animal) => {
+            if (!animal.penId) return animal;
+            const penState = pensList.find((p) => p.templateId === animal.penId && p.isOwned && !p.isOpen);
+            if (!penState) return animal;
+            const tpl = getPenTemplate(animal.penId);
+            if (!tpl || isAnimalInsidePen(animal, tpl)) return animal;
 
-          updatedAnimals = updatedAnimals.map((a) => {
-            const spot = getSleepSpot(prev.activeLocation);
-            // Slowly drift towards the cozy shelter spot with a little offset so they don't overlap completely
-            const offsetIdx = a.id.charCodeAt(a.id.length - 1) % 6;
-            const targetX = spot.x + (offsetIdx - 2.5) * 4.5;
-            const targetY = spot.y + (offsetIdx - 2.5) * 2;
-            
-            const dx = targetX - a.x;
-            const dy = targetY - a.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist > 1.5) {
-              const stepX = dx * 0.15;
-              const stepY = dy * 0.15;
-              return {
-                ...a,
-                x: Math.max(10, Math.min(90, a.x + stepX)),
-                y: Math.max(54, Math.min(86, a.y + stepY)),
-                scaleX: dx > 0 ? -1 : 1
-              };
-            }
-            return a;
+            return herdAnimalTowardPen(animal, tpl);
           });
-        } else {
-          // Normal daylight random wandering
-          const shouldShift = Math.random() < 0.22; 
+        }
+
+        // N. 👦 Коля — полив
+        if (isKolyaHired) {
+          waterOneDryGardenPlot(updatedCrops);
+        }
+
+        // Q. 💧 Тётя Вера — полив
+        if (isVeraHired) {
+          waterOneDryGardenPlot(updatedCrops);
+        }
+
+        // R. 🌱 Дед Фёдор — посадка
+        if (isFyodorHired) {
+          const fyodorPlant = plantOneEmptyGardenPlot(updatedCrops, plantingCropOrder, updatedInventory, nextCoins);
+          if (fyodorPlant.planted) nextCoins -= fyodorPlant.coinsSpent;
+        }
+
+        // S. 🌾 Сонечка — сбор урожая
+        if (isSonyaHired) {
+          if (harvestOneRipeGardenPlot(updatedCrops, updatedInventory, compostLvl)) {
+            statsHarvestedAdd += 1;
+            totalXpEarned += 10;
+          }
+        }
+
+        // T. 🪴 Гришка — полив
+        if (isGrishaHired) {
+          waterOneDryGardenPlot(updatedCrops);
+        }
+
+        // O. 👩‍🌾 Тётя Нина — собирает яйца у кур в загоне
+        if (isNinaHired) {
+          let ninaCheck = false;
+          updatedAnimals = updatedAnimals.map((animal) => {
+            if (
+              !ninaCheck &&
+              animal.productionProgress >= 100 &&
+              [AnimalSpecies.CHICKEN, AnimalSpecies.DUCK, AnimalSpecies.GOOSE].includes(animal.species)
+            ) {
+              const config = ANIMAL_TEMPLATES[animal.species];
+              updatedInventory[config.productName] = (updatedInventory[config.productName] || 0) + 1;
+              ninaCheck = true;
+              statsCollectedAdd += 1;
+              totalXpEarned += 10;
+
+              return { ...animal, productionProgress: 0 };
+            }
+            return animal;
+          });
+        }
+
+        // P. 🐰 Оля — кормит кроликов
+        if (isOlyaHired) {
+          let olyaFed = false;
+          updatedAnimals = updatedAnimals.map((animal) => {
+            if (!olyaFed && animal.species === AnimalSpecies.RABBIT && !animal.isFed) {
+              const config = ANIMAL_TEMPLATES[animal.species];
+              const foodType = config.foodType;
+              if ((updatedInventory[foodType] || 0) > 0) {
+                updatedInventory[foodType] = (updatedInventory[foodType] || 1) - 1;
+                olyaFed = true;
+                statsFedAdd += 1;
+                totalXpEarned += 7;
+
+                return {
+                  ...animal,
+                  isFed: true,
+                  fedTimeRemaining: Math.round(config.productionTime * 2),
+                  happiness: Math.min(animal.happiness + 15, 100),
+                };
+              }
+            }
+            return animal;
+          });
+          let olyaCollect = false;
+          updatedAnimals = updatedAnimals.map((animal) => {
+            if (!olyaCollect && animal.species === AnimalSpecies.RABBIT && animal.productionProgress >= 100) {
+              const config = ANIMAL_TEMPLATES[animal.species];
+              updatedInventory[config.productName] = (updatedInventory[config.productName] || 0) + 1;
+              olyaCollect = true;
+              statsCollectedAdd += 1;
+              totalXpEarned += 10;
+
+              return { ...animal, productionProgress: 0 };
+            }
+            return animal;
+          });
+        }
+
+        // Q. 🐷 Вика — собирает у свинок и чистит
+        if (isVikaHired) {
+          let vikaCollect = false;
+          updatedAnimals = updatedAnimals.map((animal) => {
+            if (!vikaCollect && animal.species === AnimalSpecies.PIG && animal.productionProgress >= 100) {
+              const config = ANIMAL_TEMPLATES[animal.species];
+              updatedInventory[config.productName] = (updatedInventory[config.productName] || 0) + 1;
+              vikaCollect = true;
+              statsCollectedAdd += 1;
+              totalXpEarned += 11;
+
+              return { ...animal, productionProgress: 0 };
+            }
+            if (!vikaCollect && animal.species === AnimalSpecies.PIG && animal.cleanliness < 75) {
+              vikaCollect = true;
+
+              return { ...animal, cleanliness: 100, happiness: Math.min(animal.happiness + 10, 100) };
+            }
+            return animal;
+          });
+        }
+
+        // R. 🐪 Игорь — собирает у пустынных зверей + монетки
+        if (isIgorHired) {
+          let igorCheck = false;
+          updatedAnimals = updatedAnimals.map((animal) => {
+            if (
+              !igorCheck &&
+              animal.productionProgress >= 100 &&
+              [AnimalSpecies.FENNEC, AnimalSpecies.CAMEL].includes(animal.species)
+            ) {
+              const config = ANIMAL_TEMPLATES[animal.species];
+              updatedInventory[config.productName] = (updatedInventory[config.productName] || 0) + 1;
+              igorCheck = true;
+              statsCollectedAdd += 1;
+              totalXpEarned += 12;
+
+              return { ...animal, productionProgress: 0 };
+            }
+            return animal;
+          });
+          nextCoins += 3;
+          totalXpEarned += 2;
+        }
+
+        // S. 🦕 Толя — гладит динозавров
+        if (isTolyaHired) {
+          let tolyaCheck = false;
+          updatedAnimals = updatedAnimals.map((animal) => {
+            if (
+              !tolyaCheck &&
+              animal.happiness < 88 &&
+              [AnimalSpecies.T_REX, AnimalSpecies.TRICERATOPS, AnimalSpecies.PTERODACTYL, AnimalSpecies.DIPLODOCUS].includes(animal.species)
+            ) {
+              tolyaCheck = true;
+
+              return { ...animal, happiness: Math.min(animal.happiness + 18, 100) };
+            }
+            return animal;
+          });
+        }
+
+        // T. 🦢 Зоя — собирает у лебедей и водоплавающих
+        if (isZoyaHired) {
+          let zoyaCheck = false;
+          updatedAnimals = updatedAnimals.map((animal) => {
+            if (
+              !zoyaCheck &&
+              animal.productionProgress >= 100 &&
+              [AnimalSpecies.SWAN, AnimalSpecies.GOOSE, AnimalSpecies.DUCK].includes(animal.species)
+            ) {
+              const config = ANIMAL_TEMPLATES[animal.species];
+              updatedInventory[config.productName] = (updatedInventory[config.productName] || 0) + 1;
+              zoyaCheck = true;
+              statsCollectedAdd += 1;
+              totalXpEarned += 11;
+
+              return { ...animal, productionProgress: 0 };
+            }
+            return animal;
+          });
+        }
+
+        // U. 🧹 Роман — убирает в доме Макса
+        if (isRomanHired) {
+          nextCoins += 2;
+          totalXpEarned += 3;
+          let romanCheer = false;
+          updatedAnimals = updatedAnimals.map((animal) => {
+            if (!romanCheer && [AnimalSpecies.CAT, AnimalSpecies.DOG].includes(animal.species) && animal.happiness < 95) {
+              romanCheer = true;
+              return { ...animal, happiness: Math.min(animal.happiness + 12, 100) };
+            }
+            return animal;
+          });
+
+        }
+
+        // --- 5. Animal wandering (day only; at night they stay in place and sleep) ---
+        const isNightVal = currentDayProgress >= 192;
+        if (!isNightVal) {
+          const shouldShift = Math.random() < 0.22;
           if (shouldShift && updatedAnimals.length > 0) {
             const randomIndex = Math.floor(Math.random() * updatedAnimals.length);
-            const a = { ...updatedAnimals[randomIndex] };
-            const dx = (Math.random() * 8 - 4);
-            const dy = (Math.random() * 6 - 3);
-            
-            a.x = Math.max(12, Math.min(88, a.x + dx));
-            a.y = Math.max(56, Math.min(84, a.y + dy));
-            a.scaleX = dx > 0 ? -1 : 1;
-            
-            updatedAnimals[randomIndex] = a;
+            updatedAnimals[randomIndex] = wanderAnimalAvoidingOthers(
+              updatedAnimals[randomIndex],
+              updatedAnimals
+            );
           }
         }
 
-        // Apply a gentle repulsion force to prevent animals from stacking in a pile!
-        for (let i = 0; i < updatedAnimals.length; i++) {
-          for (let j = i + 1; j < updatedAnimals.length; j++) {
-            const a1 = updatedAnimals[i];
-            const a2 = updatedAnimals[j];
-            const dx = a2.x - a1.x;
-            const dy = a2.y - a1.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < 4.8 && dist > 0.1) {
-              // Push them slightly apart
-              const pushX = (dx / dist) * 0.65;
-              const pushY = (dy / dist) * 0.45;
-              
-              updatedAnimals[i] = {
-                ...a1,
-                x: Math.max(10, Math.min(90, a1.x - pushX)),
-                y: Math.max(54, Math.min(86, a1.y - pushY))
-              };
-              updatedAnimals[j] = {
-                ...a2,
-                x: Math.max(10, Math.min(90, a2.x + pushX)),
-                y: Math.max(54, Math.min(86, a2.y + pushY))
-              };
-            }
-          }
-        }
+        updatedAnimals = separateAnimalsByLocation(updatedAnimals);
+        updatedAnimals = applyPenConstraints(updatedAnimals, prev.pens || []);
 
         let updatedState = {
           ...prev,
@@ -1079,7 +1177,7 @@ export default function App() {
     return () => clearInterval(ambientTimer);
   }, [gameState.animals, gameState.dayProgress, activeZone, isMuted]);
 
-  const shiftPercent = Math.max(0, Math.min((zoomScale - 1) * 100, (boyPosition.x * zoomScale) - 50));
+  const shiftPercent = Math.max(0, Math.min((effectiveZoom - 1) * 100, (boyPosition.x * effectiveZoom) - 50));
 
   // Tossing & Dragging tracking
   const draggedDistanceRef = useRef(0);
@@ -1094,6 +1192,7 @@ export default function App() {
   const pendingAnimalSpeciesRef = useRef<AnimalSpecies | null>(null);
   const audioUnlockedRef = useRef(false);
   const lastWindRef = useRef(0);
+  const animalSpacingTickRef = useRef(0);
 
   // Smooth walk & animal physics loop
   useEffect(() => {
@@ -1212,6 +1311,18 @@ export default function App() {
           return animal;
         });
 
+        animalSpacingTickRef.current += 1;
+        const shouldSeparateResting =
+          !draggedAnimalId && animalSpacingTickRef.current % 16 === 0;
+
+        if (shouldSeparateResting) {
+          const separated = separateAnimalsByLocation(updatedAnimals);
+          const moved = separated.some((a, i) => a.x !== updatedAnimals[i].x || a.y !== updatedAnimals[i].y);
+          if (moved) {
+            return { ...prev, animals: separated };
+          }
+        }
+
         if (hasChanges) {
           return {
             ...prev,
@@ -1222,15 +1333,53 @@ export default function App() {
       });
 
       // 1.5. Move hired workers dynamically on the pasture
+      workerZoneTickRef.current += 1;
+      if (workerZoneTickRef.current % 100 === 0) {
+        const gs = gameStateRef.current;
+        setWorkersPositions((prev) => {
+          let changed = false;
+          const next = { ...prev };
+          (gs.workers ?? []).forEach((worker) => {
+            if (!worker.isActive || worker.isBundledWithHome) return;
+            const pos = next[worker.id];
+            if (!pos) return;
+            const home = worker.assignedLocationId || "MEADOW";
+            const dutyZone = pickWorkerTravelZone(
+              worker.id,
+              gs.animals || [],
+              gs.inventory || {},
+              home
+            );
+            if (dutyZone !== pos.currentZone) {
+              const spot = randomSpotInZone(dutyZone);
+              next[worker.id] = {
+                ...pos,
+                currentZone: dutyZone,
+                x: spot.x,
+                y: spot.y,
+                targetX: spot.x,
+                targetY: spot.y,
+                isMoving: false,
+                actionLabel: dutyZone !== home ? (ZONE_TRAVEL_LABEL[dutyZone] || "На дело!") : undefined,
+                actionTimer: dutyZone !== home ? 2200 : 0,
+              };
+              changed = true;
+            }
+          });
+          return changed ? next : prev;
+        });
+      }
+
       setWorkersPositions((prev) => {
         const next = { ...prev };
         let updated = false;
 
         Object.keys(next).forEach((wid) => {
           const w = next[wid];
-          // Check if worker is active
-          const isWorkerActive = gameState.workers?.find((gw) => gw.id === wid)?.isActive;
-          if (!isWorkerActive) return; // don't move or animate if not hired
+          const workerInst = workersRef.current?.find((gw) => gw.id === wid);
+          if (!workerInst?.isActive) return;
+          const wPos = next[wid];
+          if (wPos.currentZone !== activeZoneRef.current) return;
 
           // Tick action bubble timer If active
           let currentActionTimer = w.actionTimer;
@@ -1266,13 +1415,37 @@ export default function App() {
               if (wid === "worker-papa" || wid === "worker-pasha" || wid === "worker-sergey") {
                 targetX = 20 + Math.random() * 50;
                 targetY = 60 + Math.random() * 20;
-              } else if (wid === "worker-mama" || wid === "worker-nadya" || wid === "worker-lena" || wid === "worker-sveta") {
+              } else if (wid === "worker-mama" || wid === "worker-lena" || wid === "worker-sveta") {
                 targetX = 15 + Math.random() * 65;
                 targetY = 62 + Math.random() * 18;
               } else if (wid === "worker-andrey" || wid === "worker-misha") {
                 targetX = 15 + Math.random() * 70;
                 targetY = 56 + Math.random() * 24;
-              } else if (wid === "worker-dima" || wid === "worker-arina" || wid === "worker-masha") {
+              } else if (wid === "worker-dima") {
+                targetX = LAKESIDE_POND.dockX - 6 + Math.random() * 12;
+                targetY = LAKESIDE_POND.dockY - 3 + Math.random() * 5;
+              } else if (wid === "worker-pastuh" || wid === "worker-nina" || wid === "worker-olya") {
+                targetX = 15 + Math.random() * 55;
+                targetY = 64 + Math.random() * 16;
+              } else if (
+                wid === "worker-kolya" || wid === "worker-nadya" || wid === "worker-vera" ||
+                wid === "worker-fyodor" || wid === "worker-sonya" || wid === "worker-grisha"
+              ) {
+                targetX = 18 + Math.random() * 64;
+                targetY = 54 + Math.random() * 18;
+              } else if (wid === "worker-roman") {
+                targetX = 25 + Math.random() * 50;
+                targetY = 58 + Math.random() * 18;
+              } else if (wid === "worker-vika") {
+                targetX = 20 + Math.random() * 60;
+                targetY = 66 + Math.random() * 14;
+              } else if (wid === "worker-igor" || wid === "worker-tolya") {
+                targetX = 18 + Math.random() * 64;
+                targetY = 60 + Math.random() * 20;
+              } else if (wid === "worker-zoya") {
+                targetX = 22 + Math.random() * 56;
+                targetY = 68 + Math.random() * 14;
+              } else if (wid === "worker-arina" || wid === "worker-masha") {
                 targetX = 20 + Math.random() * 60;
                 targetY = 65 + Math.random() * 18;
               } else {
@@ -1347,15 +1520,7 @@ export default function App() {
   const merchantCoords = { x: 82, y: 68 };
 
   const getPlotsCoords = (plotId: string) => {
-    if (plotId === "plot1") return { x: 44, y: 68 };
-    if (plotId === "plot2") return { x: 62, y: 68 };
-    if (plotId === "plot3") return { x: 40, y: 84 };
-    if (plotId === "plot4") return { x: 58, y: 84 };
-    if (plotId === "plot5") return { x: 26, y: 68 };
-    if (plotId === "plot6") return { x: 80, y: 68 };
-    if (plotId === "plot7") return { x: 22, y: 84 };
-    if (plotId === "plot8") return { x: 76, y: 84 };
-    return { x: 50, y: 75 };
+    return GARDEN_PLOT_COORDS[plotId] ?? { x: 50, y: 68 };
   };
 
   const getTreeCoords = (plotId: string) => {
@@ -1563,12 +1728,20 @@ export default function App() {
       setGameState((prev) => {
         const updated = prev.animals.map((a) => {
           if (a.id === draggedAnimalId) {
-            return {
+            const penTpl = findPenAtPoint(a.x, a.y, prev.pens || [], activeZone);
+            let next = {
               ...a,
               vx: calculatedVx,
               vy: calculatedVy,
-              angle: calculatedVx * 4
+              angle: calculatedVx * 4,
             };
+            if (penTpl && canSpeciesUsePen(a.species, penTpl.penType)) {
+              next = { ...next, penId: penTpl.id };
+              setTimeout(() => {
+                triggerNotification(`🚧 ${a.customName} теперь в загоне «${penTpl.nameRu}»!`);
+              }, 60);
+            }
+            return next;
           }
           return a;
         });
@@ -1577,6 +1750,48 @@ export default function App() {
           animals: updated
         };
       });
+    }
+  };
+
+  const handleBuyPen = (templateId: string, cost: number, minLevel: number) => {
+    const tpl = PEN_TEMPLATES.find((p) => p.id === templateId);
+    if (!tpl) return;
+    if (gameState.level < minLevel) {
+      playSadSound();
+      triggerNotification(`⭐ Нужен уровень ${minLevel}, чтобы купить загон!`);
+      return;
+    }
+    if (gameState.coins < cost) {
+      playSadSound();
+      triggerNotification(`😢 Не хватает ${cost} монеток для загона!`);
+      return;
+    }
+    const already = gameState.pens?.find((p) => p.templateId === templateId)?.isOwned;
+    if (already) return;
+    playCoinSound();
+    setGameState((prev) => ({
+      ...prev,
+      coins: prev.coins - cost,
+      pens: (prev.pens || []).map((p) =>
+        p.templateId === templateId ? { ...p, isOwned: true, isOpen: true } : p
+      ),
+    }));
+    triggerNotification(`🚧 Построен загон: ${tpl.nameRu}! Бросай туда зверушек.`);
+  };
+
+  const handleTogglePenGate = (templateId: string) => {
+    playClickSound();
+    setGameState((prev) => ({
+      ...prev,
+      pens: (prev.pens || []).map((p) =>
+        p.templateId === templateId ? { ...p, isOpen: !p.isOpen } : p
+      ),
+    }));
+    const penState = gameState.pens?.find((p) => p.templateId === templateId);
+    const tpl = getPenTemplate(templateId);
+    if (tpl) {
+      const willOpen = penState ? !penState.isOpen : true;
+      triggerNotification(willOpen ? `🔓 Ворота «${tpl.nameRu}» открыты` : `🔒 Ворота «${tpl.nameRu}» закрыты — звери не уйдут!`);
     }
   };
 
@@ -1627,24 +1842,7 @@ export default function App() {
       const animal = prev.animals.find((a) => a.id === id);
       if (!animal) return prev;
       const template = ANIMAL_TEMPLATES[animal.species];
-
-      // Smart product check: if they require MILK, check if they have goat/cow milk too
-      const foodItem = template.foodType;
-      let hasFood = (prev.inventory[foodItem] || 0) > 0;
-      let usedFoodKey = foodItem;
-
-      if (foodItem === "MILK") {
-        if ((prev.inventory["MILK"] || 0) > 0) {
-          usedFoodKey = "MILK";
-          hasFood = true;
-        } else if ((prev.inventory["Парное молоко"] || 0) > 0) {
-          usedFoodKey = "Парное молоко";
-          hasFood = true;
-        } else if ((prev.inventory["Козье молоко"] || 0) > 0) {
-          usedFoodKey = "Козье молоко";
-          hasFood = true;
-        }
-      }
+      const { hasFood, usedFoodKey } = resolveAnimalFood(prev.inventory, template.foodType);
 
       if (hasFood) {
         playEatSound();
@@ -1884,10 +2082,12 @@ export default function App() {
       const coords = getPlotsCoords(plotId);
       spawnFloatHeart(coords.x, coords.y, "💧");
       triggerNotification(`💧 Грядка полита водой! Растет сочно и весело!`);
-      return {
+      const hasWell = prev.buildings?.GARDEN?.includes("garden_well");
+      const nextState = {
         ...prev,
         crops
       };
+      return hasWell ? awardExperience(5, nextState) : nextState;
     });
   };
 
@@ -1899,12 +2099,13 @@ export default function App() {
       if (!crop || crop.progress < 100) return prev;
 
       const config = CROPS_CONFIG[crop.type];
-      const yieldCount = config.yieldCount;
+      const compostLvl = prev.upgrades["richCompost"] || 0;
+      const yieldCount = config.yieldCount + Math.min(compostLvl, 2);
+      const hasGardenShed = prev.buildings?.GARDEN?.includes("garden_shed");
 
       const finalInventory = { ...prev.inventory };
       finalInventory[crop.type] = (finalInventory[crop.type] || 0) + yieldCount;
-      // bonus free seed for easy loop!
-      finalInventory[`${crop.type}_SEED`] = (finalInventory[`${crop.type}_SEED`] || 0) + 1;
+      finalInventory[`${crop.type}_SEED`] = (finalInventory[`${crop.type}_SEED`] || 0) + (hasGardenShed ? 2 : 1);
 
       const updatedCrops = {
         ...prev.crops,
@@ -2021,8 +2222,7 @@ export default function App() {
     playAnimalSound(template.soundType);
     setGameState((prev) => {
       const freshId = `animal-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
-      const randomX = Math.round(20 + Math.random() * 60);
-      const randomY = Math.round(58 + Math.random() * 26); // Strictly on lawn grass!
+      const spawnPos = findAnimalSpawnPosition(prev.animals, activeZone);
 
       const newAnimal: AnimalInstance = {
         id: freshId,
@@ -2033,8 +2233,8 @@ export default function App() {
         productionProgress: 0,
         happiness: 80,
         cleanliness: 90,
-        x: randomX,
-        y: randomY,
+        x: spawnPos.x,
+        y: spawnPos.y,
         scaleX: 1,
         locationId: activeZone
       };
@@ -2077,8 +2277,8 @@ export default function App() {
   // Upgrade skills
   const handleUpgradeFarm = (upgradeId: string) => {
     const upgrade = UPGRADES[upgradeId];
-    const currentLvl = gameState.upgrades[upgradeId] || 1;
-    const cost = upgrade.cost * currentLvl;
+    const currentLvl = gameState.upgrades[upgradeId] ?? upgrade.level ?? 0;
+    const cost = upgrade.cost * (currentLvl + 1);
 
     if (gameState.coins < cost) {
       playSadSound();
@@ -2136,7 +2336,34 @@ export default function App() {
     });
   };
 
-  // Buy and unlock locations
+  const handleBuyMaxHomeFurniture = (furnitureId: string, cost: number, minLevel: number) => {
+    if (gameState.coins < cost) {
+      playSadSound();
+      triggerNotification("⚠️ Не хватает монет для этой вещи.");
+      return;
+    }
+    if (gameState.level < minLevel) {
+      playSadSound();
+      triggerNotification(`⚠️ Нужен уровень ${minLevel}!`);
+      return;
+    }
+    const owned = gameState.buildings?.MAX_HOME || [];
+    if (owned.includes(furnitureId)) return;
+
+    playCoinSound();
+    const item = MAX_HOME_FURNITURE.find((f) => f.id === furnitureId);
+    setGameState((prev) => ({
+      ...prev,
+      coins: prev.coins - cost,
+      buildings: {
+        ...prev.buildings,
+        MAX_HOME: [...(prev.buildings?.MAX_HOME || []), furnitureId],
+      },
+      experience: prev.experience + 20,
+    }));
+    triggerNotification(`🛋️ ${item?.nameRu ?? "Вещь"} появилась в комнате!`);
+  };
+
   const handleUnlocks = (locId: LocationId, cost: number, minLvl: number) => {
     if (gameState.level < minLvl) {
       playSadSound();
@@ -2257,6 +2484,11 @@ export default function App() {
       return;
     }
 
+    const targetElement = e.target as HTMLElement;
+    if (showLocationMap || targetElement.closest("#game-header") || targetElement.closest("#location-map-modal")) {
+      return;
+    }
+
     const rect = e.currentTarget.getBoundingClientRect();
     const fractionX = (e.clientX - rect.left) / rect.width;
     const fractionY = (e.clientY - rect.top) / rect.height;
@@ -2268,8 +2500,6 @@ export default function App() {
     const constrainedX = Math.max(5, Math.min(95, clickX));
     const constrainedY = Math.max(54, Math.min(86, clickY)); // Player click bounds constrained to grass!
 
-    // Reset floating details unless we specifically touched an item
-    const targetElement = e.target as HTMLElement;
     if (targetElement.closest(".interactive-element")) {
       return; // let element click handle selection
     }
@@ -2288,28 +2518,43 @@ export default function App() {
 
   // Get active subsets of animal species currently hanging out on selected location tab
   const getAnimalsInZone = (zone: LocationId) => {
+    if (zone === "GARDEN") return [];
+    if (zone === "MAX_HOME") {
+      return gameState.animals.filter((a) =>
+        [AnimalSpecies.CAT, AnimalSpecies.DOG].includes(a.species)
+      );
+    }
     return gameState.animals.filter((animal) => {
+      const loc = animal.locationId || "MEADOW";
+      if (loc !== zone) return false;
       const sp = animal.species;
+      if ([AnimalSpecies.CAT, AnimalSpecies.DOG].includes(sp)) return true;
       if (zone === "MEADOW") {
-        return [AnimalSpecies.CHICKEN, AnimalSpecies.DUCK].includes(sp);
+        return [AnimalSpecies.CHICKEN, AnimalSpecies.DUCK, AnimalSpecies.PEACOCK, AnimalSpecies.RABBIT].includes(sp);
       }
       if (zone === "BARNYARD") {
         return [AnimalSpecies.COW, AnimalSpecies.BULL, AnimalSpecies.PIG, AnimalSpecies.HORSE, AnimalSpecies.DONKEY, AnimalSpecies.GOAT, AnimalSpecies.SHEEP, AnimalSpecies.DOG].includes(sp);
       }
       if (zone === "LAKESIDE") {
-        return [AnimalSpecies.DUCK, AnimalSpecies.GOOSE, AnimalSpecies.GOAT, AnimalSpecies.SHEEP, AnimalSpecies.COW, AnimalSpecies.CAT].includes(sp);
+        return [AnimalSpecies.DUCK, AnimalSpecies.GOOSE, AnimalSpecies.SWAN, AnimalSpecies.GOAT, AnimalSpecies.SHEEP, AnimalSpecies.COW, AnimalSpecies.CAT].includes(sp);
       }
       if (zone === "ORCHARD") {
-        return [AnimalSpecies.HORSE, AnimalSpecies.DONKEY, AnimalSpecies.RABBIT, AnimalSpecies.CAT, AnimalSpecies.DOG, AnimalSpecies.SHEEP, AnimalSpecies.CHICKEN].includes(sp);
+        return [AnimalSpecies.HORSE, AnimalSpecies.DONKEY, AnimalSpecies.RABBIT, AnimalSpecies.CAT, AnimalSpecies.DOG, AnimalSpecies.SHEEP, AnimalSpecies.CHICKEN, AnimalSpecies.TURKEY].includes(sp);
       }
       if (zone === "DESERT") {
-        return [AnimalSpecies.T_REX, AnimalSpecies.TRICERATOPS, AnimalSpecies.PTERODACTYL, AnimalSpecies.DIPLODOCUS, AnimalSpecies.DONKEY, AnimalSpecies.GOAT].includes(sp);
+        return [AnimalSpecies.T_REX, AnimalSpecies.TRICERATOPS, AnimalSpecies.PTERODACTYL, AnimalSpecies.DIPLODOCUS, AnimalSpecies.DONKEY, AnimalSpecies.GOAT, AnimalSpecies.FENNEC, AnimalSpecies.CAMEL].includes(sp);
       }
       if (zone === "FOREST") {
         return [AnimalSpecies.RABBIT, AnimalSpecies.SHEEP, AnimalSpecies.PIG, AnimalSpecies.CAT, AnimalSpecies.DOG, AnimalSpecies.T_REX, AnimalSpecies.DIPLODOCUS].includes(sp);
       }
       if (zone === "LAKE") {
-        return [AnimalSpecies.DUCK, AnimalSpecies.GOOSE, AnimalSpecies.CAT, AnimalSpecies.SHEEP].includes(sp);
+        return [AnimalSpecies.DUCK, AnimalSpecies.GOOSE, AnimalSpecies.SWAN, AnimalSpecies.CAT, AnimalSpecies.SHEEP].includes(sp);
+      }
+      if (zone === "HILLS") {
+        return [AnimalSpecies.HORSE, AnimalSpecies.DONKEY, AnimalSpecies.SHEEP, AnimalSpecies.GOAT, AnimalSpecies.PEACOCK, AnimalSpecies.DOG].includes(sp);
+      }
+      if (zone === "VALLEY") {
+        return [AnimalSpecies.COW, AnimalSpecies.BULL, AnimalSpecies.PIG, AnimalSpecies.RABBIT, AnimalSpecies.CHICKEN, AnimalSpecies.DUCK, AnimalSpecies.GOAT].includes(sp);
       }
       return true;
     });
@@ -2477,15 +2722,29 @@ export default function App() {
 
   const onSelectZoneWithLock = (locId: LocationId) => {
     const loc = LOCATIONS[locId];
-    const isUnlocked = gameState.unlockedLocations.includes(locId);
+    const isUnlocked = isInteriorZone(locId) || gameState.unlockedLocations.includes(locId);
     if (isUnlocked) {
       playClickSound();
+      if (isInteriorZone(locId) && !isInteriorZone(activeZone)) {
+        specialReturnZoneRef.current = activeZone;
+      }
       setActiveZone(locId);
-      setBoyPosition({ x: 50, y: 70, targetX: 50, targetY: 70, isMoving: false, dir: "right" });
+      setBoyPosition({
+        x: 50,
+        y: locId === "GARDEN" ? 63 : locId === "MAX_HOME" ? 72 : 70,
+        targetX: 50,
+        targetY: locId === "GARDEN" ? 63 : locId === "MAX_HOME" ? 72 : 70,
+        isMoving: false,
+        dir: "right",
+      });
       setSelectedAnimalId(null);
       setSelectedPlotId(null);
       setSelectedTreeId(null);
-      triggerNotification(`🚪 Переместились в: ${loc.nameRu}!`);
+      const welcome =
+        locId === "GARDEN" ? "🥕 Добро пожаловать на большой огород!"
+        : locId === "MAX_HOME" ? "🏠 Дом Макса! Роман-домовой поможет купить мебель."
+        : `🚪 Переместились в: ${loc.nameRu}!`;
+      triggerNotification(welcome);
     } else {
       playSadSound();
       triggerNotification(`🔒 Ой! Эта локация закрыта. Разблокируйте её на рынке за ${loc.unlockCost} монет на Уровне ${loc.minLevel}!`);
@@ -2495,13 +2754,31 @@ export default function App() {
   };
 
   const handleNextZone = () => {
-    const nextIndex = (currentZoneIndex + 1) % ZONES_ORDER.length;
-    onSelectZoneWithLock(ZONES_ORDER[nextIndex]);
+    if (isInterior) return;
+    const nextIndex = (currentZoneIndex + 1) % WORLD_ZONES.length;
+    onSelectZoneWithLock(WORLD_ZONES[nextIndex]);
   };
 
   const handlePrevZone = () => {
-    const prevIndex = (currentZoneIndex - 1 + ZONES_ORDER.length) % ZONES_ORDER.length;
-    onSelectZoneWithLock(ZONES_ORDER[prevIndex]);
+    if (isInterior) return;
+    const prevIndex = (currentZoneIndex - 1 + WORLD_ZONES.length) % WORLD_ZONES.length;
+    onSelectZoneWithLock(WORLD_ZONES[prevIndex]);
+  };
+
+  const handleEnterGarden = () => {
+    if (activeZone === "GARDEN") return;
+    if (!isInterior) specialReturnZoneRef.current = activeZone;
+    onSelectZoneWithLock("GARDEN");
+  };
+
+  const handleExitInterior = () => {
+    if (!isInterior) return;
+    playClickSound();
+    const back = specialReturnZoneRef.current;
+    setActiveZone(back);
+    setBoyPosition({ x: 50, y: 70, targetX: 50, targetY: 70, isMoving: false, dir: "right" });
+    setSelectedPlotId(null);
+    triggerNotification(`⬆️ Возвращаемся: ${LOCATIONS[back].nameRu}`);
   };
 
   // Core objects positions
@@ -2563,8 +2840,7 @@ export default function App() {
               level={gameState.level}
               experience={gameState.experience}
               activeLocationId={activeZone}
-              unlockedLocationIds={gameState.unlockedLocations}
-              onSelectLocation={onSelectZoneWithLock}
+              onOpenMap={() => setShowLocationMap(true)}
               onOpenHelp={() => setShowHelp(true)}
               isMuted={isMuted}
               onToggleMute={handleToggleMute}
@@ -2579,7 +2855,7 @@ export default function App() {
               id="scrolling-stage"
               className="absolute inset-0 select-none"
               style={{
-                transform: `scale(${zoomScale}) translateX(${-shiftPercent / zoomScale}%)`,
+                transform: `scale(${effectiveZoom}) translateX(${-shiftPercent / effectiveZoom}%)`,
                 transformOrigin: "left bottom",
                 width: "100%",
                 height: "100%",
@@ -2617,7 +2893,20 @@ export default function App() {
                 <div className="absolute top-24 right-[5%] w-24 h-8 bg-white/25 rounded-full animate-drift-cloud-2" style={{ animationDelay: '-3s' }} />
               </div>
 
-            {/* 2. OVERLAPPING GREEN HILLS (vector style) */}
+            {/* === ДОМ МАКСА — уютный интерьер === */}
+            {activeZone === "MAX_HOME" && (
+              <MaxHomeInterior
+                ownedFurniture={gameState.buildings?.MAX_HOME || []}
+                onOpenShop={() => {
+                  playClickSound();
+                  setShowMaxHomeShop(true);
+                  triggerNotification("🛋️ Роман-домовой: выбирай мебель для комнаты!");
+                }}
+              />
+            )}
+
+            {activeZone !== "MAX_HOME" && (
+            <>
             <div className="absolute inset-x-0 bottom-[36px] h-64 z-0 pointer-events-none select-none overflow-hidden">
               {/* Far Hills (Layer 1) - Darker/Cooler green */}
               <div className={`absolute -bottom-8 -left-12 w-[60%] h-[180px] rounded-t-[140px] opacity-75 ${
@@ -2671,7 +2960,10 @@ export default function App() {
             <div className={`absolute inset-x-0 bottom-0 top-[54%] z-0 shadow-inner overflow-hidden ${
               activeZone === "MEADOW" ? "bg-gradient-to-t from-emerald-600 via-green-500 to-[#10B981]" :
               activeZone === "BARNYARD" ? "bg-gradient-to-t from-[#B45309] via-amber-600 to-[#F59E0B]" :
+              activeZone === "GARDEN" ? "bg-gradient-to-t from-[#365314] via-lime-600 to-[#84CC16]" :
               activeZone === "LAKESIDE" ? "bg-gradient-to-t from-sky-400 via-emerald-500 to-green-500" :
+              activeZone === "HILLS" ? "bg-gradient-to-t from-lime-700 via-emerald-500 to-green-400" :
+              activeZone === "VALLEY" ? "bg-gradient-to-t from-teal-600 via-green-500 to-lime-400" :
               "bg-gradient-to-t from-[#0F766E] via-emerald-600 to-[#2DD4BF]"
             }`} id="lawn-grass">
               {/* Stepping Path Stones */}
@@ -2684,17 +2976,53 @@ export default function App() {
                 <div className="w-6 h-2 bg-stone-500 rounded-full" />
               </div>
             </div>
+            </>
+            )}
 
-            {/* Lakeside Pond layout */}
+            {/* Lakeside Pond layout — явный пруд с причалом */}
             {activeZone === "LAKESIDE" && (
-              <div className="absolute inset-x-0 bottom-[36px] top-[75%] bg-gradient-to-t from-blue-600 via-sky-500/80 to-transparent z-10 pointer-events-none select-none" id="lakeside-water">
-                <div className="absolute inset-x-0 bottom-0 h-8 bg-blue-700/40 flex items-center justify-around">
-                  {/* Lilies */}
-                  <span className="text-2xl animate-pulse opacity-85">🪷</span>
-                  <span className="text-xl opacity-75">🪷</span>
-                  <span className="text-2xl opacity-85 animate-bounce-slow">🪷</span>
+              <>
+                <div
+                  className="absolute z-[8] pointer-events-none select-none rounded-t-[40%] border-4 border-sky-600/50 shadow-inner"
+                  style={{
+                    left: `${LAKESIDE_POND.minX}%`,
+                    right: `${100 - LAKESIDE_POND.maxX}%`,
+                    top: `${LAKESIDE_POND.minY}%`,
+                    bottom: `${100 - LAKESIDE_POND.maxY}%`,
+                    background: "linear-gradient(to top, #1D4ED8 0%, #38BDF8 55%, #7DD3FC 100%)",
+                  }}
+                  id="lakeside-water"
+                >
+                  <div className="absolute inset-0 opacity-30 bg-[repeating-linear-gradient(90deg,transparent,transparent 12px,rgba(255,255,255,0.15)_12px,rgba(255,255,255,0.15)_24px)] animate-pulse" />
+                  <div className="absolute inset-x-0 bottom-0 h-8 flex items-center justify-around">
+                    <span className="text-2xl animate-pulse opacity-85">🪷</span>
+                    <span className="text-xl opacity-75">🪷</span>
+                    <span className="text-2xl opacity-85 animate-bounce-slow">🪷</span>
+                  </div>
                 </div>
-              </div>
+                {/* Причал для рыбака Димы */}
+                <div
+                  className="absolute z-[9] pointer-events-none"
+                  style={{ left: `${LAKESIDE_POND.dockX - 4}%`, top: `${LAKESIDE_POND.dockY - 2}%` }}
+                >
+                  <div className="w-16 h-4 bg-amber-800 rounded-sm border-2 border-amber-950 shadow-md" />
+                  <div className="text-[8px] font-black text-amber-950 bg-amber-100/90 px-1 rounded mt-0.5 whitespace-nowrap">🎣 Пруд</div>
+                </div>
+                {/* Плавающие рыбки */}
+                {pondFish.map((f) => (
+                  <div
+                    key={f.id}
+                    className="absolute z-[10] pointer-events-none text-2xl select-none"
+                    style={{
+                      left: `${f.x}%`,
+                      top: `${f.y}%`,
+                      transform: `translate(-50%, -50%) scaleX(${f.scaleX})`,
+                    }}
+                  >
+                    {f.emoji}
+                  </div>
+                ))}
+              </>
             )}
 
             {/* 5. UNDERGROUND SOIL LAYER (CROSS-SECTION ACCORDING TO SCREENSHOT) */}
@@ -2933,18 +3261,31 @@ export default function App() {
             )}
 
 
-            {/* C. DUAL-ROW COZY ORGANIC SOIL BEDS (Visible in BARNYARD zone ONLY!) */}
-            {activeZone === "BARNYARD" && (
-              <div className="absolute w-[44%] h-[200px] pointer-events-none select-none z-0" style={{ left: "50%", top: "72%", transform: "translateX(-45%)" }} id="tilled-soil-strips">
-                {/* Upper Dirt Strip */}
-                <div className="absolute left-0 bottom-16 w-full h-[32px] bg-gradient-to-r from-[#451A03] to-[#3B2314] rounded-full opacity-90 shadow-md border-b-2 border-stone-900/40" />
-                {/* Lower Dirt Strip */}
-                <div className="absolute left-[5%] bottom-2 w-[90%] h-[32px] bg-gradient-to-r from-[#451A03] to-[#3B2314] rounded-full opacity-90 shadow-md border-b-2 border-stone-900/40" />
+            {/* C. Компактные грядки — всё на одном экране */}
+            {activeZone === "GARDEN" && (
+              <div className="absolute inset-x-[4%] top-[48%] bottom-[24px] pointer-events-none select-none z-0" id="garden-field">
+                {GARDEN_ROW_Y.map((rowY) => (
+                  <div
+                    key={rowY}
+                    className="absolute left-0 right-0 h-[18px] bg-gradient-to-r from-[#3F2A14] via-[#5C3A21] to-[#3F2A14] rounded-full opacity-95 shadow-md border-b-2 border-stone-900/50"
+                    style={{ top: `${((rowY - 48) / 24) * 100}%` }}
+                  />
+                ))}
+                <span className="absolute left-[2%] top-[8%] text-2xl opacity-85">🧑‍🌾</span>
+                <span className="absolute right-[2%] top-[12%] text-2xl opacity-85">🪣</span>
+                <span className="absolute left-1/2 -translate-x-1/2 top-[-8%] text-xl opacity-75">🌻</span>
+                {(gameState.buildings?.GARDEN || []).includes("garden_autowater") && (
+                  <>
+                    <span className="absolute left-[25%] top-[55%] text-xl opacity-90 animate-pulse">💦</span>
+                    <span className="absolute left-1/2 -translate-x-1/2 top-[58%] text-xl opacity-90 animate-pulse" style={{ animationDelay: "0.5s" }}>💦</span>
+                    <span className="absolute right-[25%] top-[55%] text-xl opacity-90 animate-pulse" style={{ animationDelay: "1s" }}>💦</span>
+                  </>
+                )}
               </div>
             )}
 
-            {/* D. CROP PLOTS (Rendering directly out of pasture dirt - ONLY in BARNYARD room!) */}
-            {activeZone === "BARNYARD" && (
+            {/* D. CROP PLOTS — только на большом огороде */}
+            {activeZone === "GARDEN" && (
               ALL_PLOT_IDS.map((plotId) => {
                 const crop = gameState.crops[plotId];
                 const coords = getPlotsCoords(plotId);
@@ -2974,8 +3315,8 @@ export default function App() {
                         left: `${coords.x}%`,
                         top: `${coords.y}%`,
                         transform: 'translate(-50%, -100%)',
-                        width: '68px',
-                        height: '62px'
+                        width: '52px',
+                        height: '46px'
                       }}
                     >
                       <span className="text-xl">🪵</span>
@@ -3016,8 +3357,8 @@ export default function App() {
                       left: `${coords.x}%`,
                       top: `${coords.y}%`,
                       transform: 'translate(-50%, -100%)',
-                      width: '68px',
-                      height: '62px'
+                      width: '52px',
+                      height: '46px'
                     }}
                   >
                     {/* Render our advanced custom vector crop graphics helper */}
@@ -3070,21 +3411,26 @@ export default function App() {
                         onClick={(e) => {
                           e.stopPropagation();
                           playClickSound();
-                          const currentLvl = gameState.maxHouseLevel || 1;
-                          const upgradeCost = currentLvl * 300;
-                          if (gameState.coins >= upgradeCost) {
-                            setGameState(prev => ({
-                              ...prev,
-                              coins: prev.coins - upgradeCost,
-                              maxHouseLevel: currentLvl + 1
-                            }));
-                            playLevelUpSound();
-                            triggerNotification(`🎉 Дом Макса улучшен до уровня ${currentLvl + 1}! Собака и кошка счастливы!`);
-                            spawnFloatHeart(bld.x, bld.y - 12, "👑");
-                          } else {
-                            playSadSound();
-                            triggerNotification(`⚠️ Нужно ${upgradeCost} монет для улучшения дома до уровня ${currentLvl + 1}!`);
+                          if (e.shiftKey) {
+                            const currentLvl = gameState.maxHouseLevel || 1;
+                            const upgradeCost = currentLvl * 300;
+                            if (gameState.coins >= upgradeCost) {
+                              setGameState(prev => ({
+                                ...prev,
+                                coins: prev.coins - upgradeCost,
+                                maxHouseLevel: currentLvl + 1
+                              }));
+                              playLevelUpSound();
+                              triggerNotification(`🎉 Дом Макса улучшен до уровня ${currentLvl + 1}!`);
+                              spawnFloatHeart(bld.x, bld.y - 12, "👑");
+                            } else {
+                              playSadSound();
+                              triggerNotification(`⚠️ Нужно ${upgradeCost} монет для улучшения!`);
+                            }
+                            return;
                           }
+                          if (!isInteriorZone(activeZone)) specialReturnZoneRef.current = activeZone;
+                          onSelectZoneWithLock("MAX_HOME");
                         }}
                       >
                         {(gameState.maxHouseLevel || 1) === 1 ? "🛖" : (gameState.maxHouseLevel || 1) === 2 ? "🏡" : (gameState.maxHouseLevel || 1) === 3 ? "🧱" : (gameState.maxHouseLevel || 1) === 4 ? "🏰" : "🏰👑"}
@@ -3093,22 +3439,17 @@ export default function App() {
                         onClick={(e) => {
                           e.stopPropagation();
                           playClickSound();
-                          const currentLvl = gameState.maxHouseLevel || 1;
-                          const upgradeCost = currentLvl * 300;
-                          triggerNotification(`🏡 Дом Макса (Ур. ${currentLvl}). Кликни, чтобы улучшить за ${upgradeCost} 🪙!`);
+                          triggerNotification(`🏡 Кликни на дом — войти внутрь! Shift+клик — улучшить (Ур. ${gameState.maxHouseLevel || 1})`);
                         }}
                       >
                         🏡 {bld.nameRu} (Ур. {gameState.maxHouseLevel || 1})
                       </div>
-                      
-                      {/* Lounging owned pets */}
-                      <div className="absolute top-[75%] -left-10 flex gap-2.5 z-10">
-                        {gameState.animals.some(a => a.species === AnimalSpecies.CAT) && (
-                          <div className="text-xl bg-white/80 p-1 rounded-lg border border-amber-800 animate-pulse pointer-events-auto cursor-help" title="Кошка Мурка нежится у крыльца">🐱</div>
-                        )}
-                        {gameState.animals.some(a => a.species === AnimalSpecies.DOG) && (
-                          <div className="text-xl bg-white/80 p-1 rounded-lg border border-amber-800 animate-bounce pointer-events-auto cursor-help" title="Пес Шарик охраняет крыльцо">🐶</div>
-                        )}
+                    </div>
+                  ) : bld.id === "garden_scarecrow" ? (
+                    <div className="flex flex-col items-center text-center drop-shadow-md cursor-help pointer-events-auto">
+                      <ScarecrowSVG className="w-24 h-32 md:w-28 md:h-36 filter drop-shadow-lg hover:scale-105 transition-transform" />
+                      <div className="bg-[#5C3A21] border-2 border-[#FEF3C7] text-[8px] font-black text-[#FEF3C7] uppercase px-2 py-0.5 rounded-full shadow-md mt-1 scale-90 whitespace-nowrap">
+                        🌾 {bld.nameRu}
                       </div>
                     </div>
                   ) : (
@@ -3205,6 +3546,50 @@ export default function App() {
                 );
               })
             )}
+
+            {/* Загоны с забором (покупаемые) */}
+            {(gameState.pens || [])
+              .filter((p) => p.isOwned)
+              .map((penState) => {
+                const tpl = getPenTemplate(penState.templateId);
+                if (!tpl || tpl.locationId !== activeZone) return null;
+                const b = {
+                  left: tpl.x - tpl.width / 2,
+                  top: tpl.y - tpl.height / 2,
+                  width: tpl.width,
+                  height: tpl.height,
+                };
+                return (
+                  <div
+                    key={tpl.id}
+                    className="absolute z-[6] pointer-events-auto"
+                    style={{
+                      left: `${b.left}%`,
+                      top: `${b.top}%`,
+                      width: `${b.width}%`,
+                      height: `${b.height}%`,
+                    }}
+                  >
+                    <div className={`absolute inset-0 rounded-xl border-4 border-dashed ${
+                      penState.isOpen ? "border-amber-600/70 bg-amber-50/10" : "border-emerald-700 bg-emerald-50/15"
+                    }`} />
+                    <div className="absolute -top-5 left-1/2 -translate-x-1/2 flex items-center gap-1">
+                      <span className="text-[7px] font-black bg-white/90 px-1.5 py-0.5 rounded-full border border-amber-800 text-amber-950 whitespace-nowrap">
+                        {getPenTypeEmoji(tpl.penType)} {tpl.nameRu}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTogglePenGate(tpl.id);
+                        }}
+                        className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-amber-500 text-white border border-amber-700 shadow cursor-pointer hover:bg-amber-600"
+                      >
+                        {penState.isOpen ? "🔓" : "🔒"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
 
             {/* E. ANIMALS ROAMING & WALKING (Enlarged with massive size for kid touch!) */}
             {activeAnimalsList.map((animal) => {
@@ -3393,100 +3778,34 @@ export default function App() {
 
             {/* F2. ACTIVE HIRED WORKERS (👨‍🌾 👩‍🌾 👦🏻) - High-fidelity Visual Sprites! */}
             {(gameState.workers ?? []).map((worker) => {
-              if (!worker.isActive || worker.assignedLocationId !== activeZone) return null;
-
-              // Determine placement on screen depending on role
+              if (worker.isBundledWithHome || worker.id === "worker-roman") return null;
+              if (!worker.isActive) return null;
               const pos = workersPositions[worker.id];
+              if (!pos || pos.currentZone !== activeZone) return null;
               const posX = pos ? pos.x : 20;
               const posY = pos ? pos.y : 72;
-              const workerVisualType =
-                worker.id === "worker-mama" ? "feed"
-                : worker.id === "worker-nadya" ? "grow"
-                : worker.id === "worker-lena" || worker.id === "worker-pasha" ? "clean"
-                : null;
-              let actionIcon = "💼";
-              let workerSVG = null;
-
-              if (workerVisualType === "feed") {
-                actionIcon = "🍿";
-                workerSVG = (
-                  <svg viewBox="0 0 60 70" className="w-16 h-18 filter drop-shadow-md">
-                    {/* Hat with flat border */}
-                    <ellipse cx="30" cy="18" rx="15" ry="5" fill="#B45309" stroke="#713F12" strokeWidth="2" />
-                    <rect x="22" y="10" width="16" height="8" rx="2" fill="#D97706" stroke="#713F12" strokeWidth="2" />
-                    {/* Gray hair and hair bangs */}
-                    <circle cx="16" cy="27" r="4" fill="#9CA3AF" />
-                    <circle cx="44" cy="27" r="4" fill="#9CA3AF" />
-                    <path d="M 18 24 Q 30 19 42 24" fill="#9CA3AF" />
-                    {/* Experienced tanned face */}
-                    <circle cx="30" cy="30" r="11" fill="#FFC08A" stroke="#713F12" strokeWidth="1.5" />
-                    <circle cx="25" cy="28" r="1.5" fill="#1F2937" />
-                    <circle cx="35" cy="28" r="1.5" fill="#1F2937" />
-                    {/* Kindly grey mustache */}
-                    <path d="M 22 34 Q 30 33 38 34" stroke="#D1D5DB" strokeWidth="3.5" fill="none" strokeLinecap="round" />
-                    <path d="M 22 34 Q 18 38 16 34 M 38 34 Q 42 38 44 34" stroke="#713F12" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-                    {/* Cozy green vest and plaid shirt */}
-                    <rect x="20" y="39" width="20" height="18" rx="4" fill="#047857" stroke="#065F46" strokeWidth="1.5" />
-                    <rect x="23" y="39" width="14" height="18" fill="#F59E0B" opacity="0.3" />
-                    {/* Arms holding feed bucket */}
-                    <line x1="18" y1="44" x2="12" y2="52" stroke="#FFC08A" strokeWidth="5" strokeLinecap="round" />
-                    <line x1="42" y1="44" x2="48" y2="52" stroke="#FFC08A" strokeWidth="5" strokeLinecap="round" />
-                    {/* Feed Bucket */}
-                    <path d="M 44 50 L 52 50 L 50 62 L 46 62 Z" fill="#9CA3AF" stroke="#374151" strokeWidth="1.5" />
-                    <ellipse cx="48" cy="50" rx="4" ry="1.5" fill="#F59E0B" />
-                  </svg>
-                );
-              } else if (workerVisualType === "grow") {
-                actionIcon = "🌱";
-                workerSVG = (
-                  <svg viewBox="0 0 60 70" className="w-16 h-18 filter drop-shadow-md">
-                    {/* Elegant pink headscarf (Платочек) wrapping the head */}
-                    <ellipse cx="30" cy="22" rx="14" ry="11" fill="#EC4899" stroke="#9D174D" strokeWidth="1.5" />
-                    <path d="M 16 24 C 18 10, 42 10, 44 24" fill="#EC4899" stroke="#9D174D" strokeWidth="1.5" />
-                    <path d="M 44 22 L 48 18 L 43 25" stroke="#9D174D" strokeWidth="1.5" fill="#EC4899" />
-                    {/* Kind face */}
-                    <circle cx="30" cy="30" r="11" fill="#FFE4E6" stroke="#713F12" strokeWidth="1.5" />
-                    <circle cx="22" cy="32" r="2.5" fill="#EF4444" opacity="0.5" />
-                    <circle cx="38" cy="32" r="2.5" fill="#EF4444" opacity="0.5" />
-                    <circle cx="25" cy="28" r="1.5" fill="#1F2937" />
-                    <circle cx="35" cy="28" r="1.5" fill="#1F2937" />
-                    <path d="M 26 33 Q 30 36 34 33" stroke="#713F12" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-                    {/* Green field dress and yellow apron */}
-                    <path d="M 20 41 L 40 41 L 44 57 L 16 57 Z" fill="#059669" stroke="#047857" strokeWidth="1.5" />
-                    <rect x="23" y="44" width="14" height="13" fill="#F59E0B" stroke="#D97706" strokeWidth="1" />
-                    {/* Hands holding mini watering tool */}
-                    <line x1="18" y1="44" x2="14" y2="52" stroke="#FFE4E6" strokeWidth="5.5" strokeLinecap="round" />
-                    <line x1="42" y1="44" x2="46" y2="52" stroke="#FFE4E6" strokeWidth="5.5" strokeLinecap="round" />
-                    <rect x="10" y="48" width="6" height="6" rx="1" fill="#0D9488" />
-                    <path d="M 10 51 L 6 54 L 6 52 Z" stroke="#0D9488" strokeWidth="1.5" />
-                  </svg>
-                );
-              } else if (workerVisualType === "clean") {
-                actionIcon = worker.id === "worker-pasha" ? "🧼" : "🧹";
-                workerSVG = (
-                  <svg viewBox="0 0 60 70" className="w-16 h-18 filter drop-shadow-md">
-                    {/* Cap worn backwards */}
-                    <ellipse cx="30" cy="21" rx="11" ry="8" fill="#F59E0B" stroke="#B45309" strokeWidth="1.5" />
-                    <path d="M 30 15 L 14 18" stroke="#B45309" strokeWidth="3" strokeLinecap="round" />
-                    {/* Playful brunette hair */}
-                    <circle cx="17" cy="27" r="4" fill="#4B5563" />
-                    <circle cx="43" cy="27" r="4" fill="#4B5563" />
-                    <path d="M 18 24 Q 30 20 42 24" fill="#4B5563" />
-                    {/* Chubby face */}
-                    <circle cx="30" cy="30" r="11" fill="#FFE5D9" stroke="#713F12" strokeWidth="1.5" />
-                    <circle cx="25" cy="28" r="1.8" fill="#1F2937" />
-                    <circle cx="35" cy="28" r="1.8" fill="#1F2937" />
-                    <path d="M 26 33 Q 30 38 34 33" stroke="#713F12" strokeWidth="1.5" strokeLinecap="round" fill="none" />
-                    {/* Red t-shirt & white shorts */}
-                    <rect x="20" y="39" width="20" height="16" rx="3" fill="#EF4444" stroke="#DC2626" strokeWidth="1.5" />
-                    <rect x="21" y="55" width="18" height="4" fill="#FFFFFF" />
-                    {/* Sweeping broom */}
-                    <line x1="18" y1="44" x2="10" y2="35" stroke="#78350F" strokeWidth="3" strokeLinecap="round" />
-                    <path d="M 11 38 Q 4 30 6 39 Z" fill="#FCD34D" stroke="#D97706" strokeWidth="1" />
-                  </svg>
-                );
-              }
-
+              const actionIcon =
+                worker.id === "worker-mama" ? "🍿"
+                : worker.id === "worker-nadya" || worker.id === "worker-kolya" || worker.id === "worker-fyodor" ? "🌱"
+                : worker.id === "worker-vera" || worker.id === "worker-grisha" ? "💧"
+                : worker.id === "worker-sonya" ? "🌾"
+                : worker.id === "worker-lena" ? "🧹"
+                : worker.id === "worker-pasha" ? "🧼"
+                : worker.id === "worker-papa" ? "🔨"
+                : worker.id === "worker-dima" ? "🎣"
+                : worker.id === "worker-pastuh" ? "🤠"
+                : worker.id === "worker-nina" ? "🥚"
+                : worker.id === "worker-sveta" ? "🍞"
+                : worker.id === "worker-misha" ? "✂️"
+                : worker.id === "worker-masha" ? "⭐"
+                : worker.id === "worker-sergey" ? "🔧"
+                : worker.id === "worker-olya" ? "🐰"
+                : worker.id === "worker-vika" ? "🐷"
+                : worker.id === "worker-igor" ? "🏜️"
+                : worker.id === "worker-tolya" ? "🦕"
+                : worker.id === "worker-zoya" ? "🦢"
+                : worker.id === "worker-roman" ? "🧹"
+                : "💼";
               const isMoving = pos ? pos.isMoving : false;
               const dir = pos ? pos.dir : "right";
               const actionLabel = pos ? pos.actionLabel : undefined;
@@ -3522,9 +3841,7 @@ export default function App() {
                     )}
 
                     <div className="w-16 h-18">
-                      {workerSVG || (
-                        <span className="text-5xl filter drop-shadow-md block text-center leading-none">{worker.emoji}</span>
-                      )}
+                      <WorkerSVG workerId={worker.id} />
                     </div>
 
                     {/* Ground shadow for physical depth */}
@@ -3843,7 +4160,8 @@ export default function App() {
 
             </div> {/* END OF scrolling-stage */}
 
-            {/* --- MULTI-ROOM / LEVEL NAVIGATION ARROWS (all 7 locations) --- */}
+            {/* --- MULTI-ROOM NAVIGATION: left/right (мир) + down/up (огород) --- */}
+            {!isInterior && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -3862,8 +4180,9 @@ export default function App() {
                 </>
               )}
             </button>
+            )}
 
-            {(() => {
+            {!isInterior && (() => {
               const isUnlocked = gameState.unlockedLocations.includes(nextZone);
               const nextConfig = LOCATIONS[nextZone];
               return (
@@ -3894,6 +4213,50 @@ export default function App() {
               );
             })()}
 
+            {!isInterior && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleEnterGarden();
+                }}
+                className={`absolute left-1/2 -translate-x-1/2 bottom-3 sm:bottom-4 bg-gradient-to-b from-lime-200 to-emerald-400 hover:from-lime-100 hover:to-emerald-300 border-4 border-[#166534] rounded-[20px] flex flex-col items-center gap-0.5 shadow-2xl hover:scale-110 active:scale-95 transition-all z-30 cursor-pointer ${
+                  isPhone ? "p-2 px-4 min-w-[64px]" : "p-2 px-5"
+                }`}
+                id="transition-down-garden"
+              >
+                <span className={isPhone ? "text-2xl" : "text-xl"}>⬇️</span>
+                {!isPhone && (
+                  <>
+                    <span className="text-[8px] font-black text-[#14532D] uppercase tracking-wider leading-none">Огород</span>
+                    <span className="text-[7.5px] font-extrabold text-[#166534] leading-none mt-0.5">🥕 Грядки</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {isInterior && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleExitInterior();
+                }}
+                className={`absolute left-1/2 -translate-x-1/2 bottom-3 sm:bottom-4 bg-gradient-to-b from-amber-100 to-amber-300 hover:from-white hover:to-amber-200 border-4 border-[#7A4E31] rounded-[20px] flex flex-col items-center gap-0.5 shadow-2xl hover:scale-110 active:scale-95 transition-all z-30 cursor-pointer ${
+                  isPhone ? "p-2 px-4 min-w-[64px]" : "p-2 px-5"
+                }`}
+                id="transition-up-from-interior"
+              >
+                <span className={isPhone ? "text-2xl" : "text-xl"}>⬆️</span>
+                {!isPhone && (
+                  <>
+                    <span className="text-[8px] font-black text-[#5C3A21] uppercase tracking-wider leading-none">Наверх</span>
+                    <span className="text-[7.5px] font-extrabold text-[#92400E] max-w-[70px] truncate leading-none mt-0.5 text-center">
+                      {LOCATIONS[specialReturnZoneRef.current].nameRu}
+                    </span>
+                  </>
+                )}
+              </button>
+            )}
+
           </div>
         </div>
 
@@ -3920,7 +4283,7 @@ export default function App() {
 
              {/* Central big category tabs */}
             <div className="flex flex-wrap gap-1 lg:gap-1.5 justify-center mb-2 lg:mb-4 bg-[#6B3F23]/10 p-1 lg:p-1.5 rounded-xl lg:rounded-2xl" id="shop-tabs">
-              {(["sell", "animals", "upgrades", "lands", "workers"] as const).map((tab) => (
+              {(["sell", "animals", "upgrades", "lands", "workers", "pens"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => { playClickSound(); setShopActiveTab(tab); }}
@@ -3935,6 +4298,7 @@ export default function App() {
                   {tab === "upgrades" && "🪄 Навыки"}
                   {tab === "lands" && "🗺️ Карта"}
                   {tab === "workers" && "💼 Рабочие"}
+                  {tab === "pens" && "🚧 Загоны"}
                 </button>
               ))}
             </div>
@@ -4099,9 +4463,9 @@ export default function App() {
                 <div className="space-y-2">
                   {Object.keys(UPGRADES).map((id) => {
                     const upgrade = UPGRADES[id];
-                    const currentLvl = gameState.upgrades[id] || 1;
+                    const currentLvl = gameState.upgrades[id] ?? upgrade.level ?? 0;
                     const maxedOut = currentLvl >= upgrade.maxLevel;
-                    const cost = upgrade.cost * currentLvl;
+                    const cost = upgrade.cost * (currentLvl + 1);
                     const isAffordable = gameState.coins >= cost && !maxedOut;
 
                     return (
@@ -4151,6 +4515,7 @@ export default function App() {
                 </div>
 
                 {Object.keys(LOCATIONS).map((locId) => {
+                  if (locId === "MAX_HOME") return null;
                   const loc = LOCATIONS[locId as LocationId];
                   const isUnlocked = gameState.unlockedLocations.includes(locId as LocationId);
                   const isAffordable = gameState.coins >= loc.unlockCost && gameState.level >= loc.minLevel;
@@ -4164,6 +4529,10 @@ export default function App() {
                           <span className="text-2xl lg:text-3xl bg-[#FEF3C7] p-1.5 lg:p-2 rounded-lg lg:rounded-xl h-10 w-10 lg:h-12 lg:w-12 flex items-center justify-center">
                             {locId === "MEADOW" && "🌸"}
                             {locId === "BARNYARD" && "🏡"}
+                            {locId === "MAX_HOME" && "🏠"}
+                            {locId === "GARDEN" && "🥕"}
+                            {locId === "HILLS" && "⛰️"}
+                            {locId === "VALLEY" && "🌄"}
                             {locId === "LAKESIDE" && "🦆"}
                             {locId === "ORCHARD" && "🌳"}
                             {locId === "DESERT" && "🏜️"}
@@ -4260,7 +4629,7 @@ export default function App() {
                   💡 <strong>Совет Максима:</strong> Рабочие будут автоматически делать повседневные дела, пока у тебя есть монетки! Их зарплата вычитается в конце каждого дня 🌅. Если денег не останется, они уйдут.
                 </div>
                 
-                {(gameState.workers || []).map((worker) => {
+                {(gameState.workers || []).filter((w) => !w.isBundledWithHome).map((worker) => {
                   const isAffordableToHire = gameState.coins >= worker.dailyWage;
                   return (
                     <div key={worker.id} className={`bg-white p-2 lg:p-3 rounded-xl lg:rounded-2xl border-2 flex flex-col sm:flex-row items-center justify-between shadow-xs ${worker.isActive ? "border-green-400 bg-green-50/10" : "border-[#6B3F23]/15"}`}>
@@ -4346,6 +4715,48 @@ export default function App() {
               </div>
             )}
 
+            {/* TAB CONTENT: 6. PENS / ENCLOSURES */}
+            {shopActiveTab === "pens" && (
+              <div className="space-y-2 lg:space-y-3 max-h-[260px] lg:max-h-[380px] overflow-y-auto pr-1">
+                <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-3 text-xs text-emerald-900 font-bold">
+                  🚧 <strong>Загоны:</strong> купи забор, брось туда зверушку (удержи и перетащи). Закрой ворота 🔒 — животные не убегут! Пастух Ваня загонит разбежавшихся.
+                </div>
+                {PEN_TEMPLATES.map((penTpl) => {
+                  const penState = gameState.pens?.find((p) => p.templateId === penTpl.id);
+                  const owned = penState?.isOwned ?? false;
+                  const canBuy = gameState.coins >= penTpl.cost && gameState.level >= penTpl.minLevel;
+                  const locName = LOCATIONS[penTpl.locationId]?.nameRu || penTpl.locationId;
+                  const animalLabel = `${getPenTypeEmoji(penTpl.penType)} ${getPenTypeLabel(penTpl.penType)}`;
+                  return (
+                    <div key={penTpl.id} className={`bg-white p-2 lg:p-3 rounded-xl border-2 flex flex-col sm:flex-row items-center justify-between gap-2 ${owned ? "border-emerald-400 bg-emerald-50/20" : "border-[#6B3F23]/15"}`}>
+                      <div className="text-left">
+                        <h4 className="font-extrabold text-xs text-slate-900">{penTpl.nameRu}</h4>
+                        <p className="text-[9px] text-slate-500 mt-1">📍 {locName} · {animalLabel}</p>
+                        <p className="text-[9px] text-amber-800 font-bold mt-0.5">Уровень {penTpl.minLevel}+ · {penTpl.cost} 🪙</p>
+                      </div>
+                      <div className="shrink-0">
+                        {owned ? (
+                          <span className="text-[9px] font-black text-emerald-700 bg-emerald-100 px-2 py-1 rounded-lg border border-emerald-300">
+                            ✅ Построен {penState?.isOpen ? "🔓 открыт" : "🔒 закрыт"}
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleBuyPen(penTpl.id, penTpl.cost, penTpl.minLevel)}
+                            disabled={!canBuy}
+                            className={`py-1.5 px-3 rounded-xl text-[10px] font-black cursor-pointer ${
+                              canBuy ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "bg-slate-100 text-slate-400 cursor-not-allowed"
+                            }`}
+                          >
+                            Купить {penTpl.cost}м
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Dialogue footer statistics */}
             <div className="mt-2 lg:mt-4 pt-2 lg:pt-3.5 border-t-2 lg:border-t-4 border-dashed border-[#6B3F23]/15 flex justify-between items-center text-[8px] lg:text-[10px] text-[#6B3F23] font-black uppercase tracking-wider">
               <span>Золотой баланс: <strong className="text-yellow-600">{gameState.coins} монет 🪙</strong></span>
@@ -4353,6 +4764,27 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {showLocationMap && (
+        <LocationMapModal
+          activeLocationId={activeZone}
+          unlockedLocationIds={gameState.unlockedLocations}
+          level={gameState.level}
+          coins={gameState.coins}
+          onSelectLocation={onSelectZoneWithLock}
+          onClose={() => setShowLocationMap(false)}
+        />
+      )}
+
+      {showMaxHomeShop && activeZone === "MAX_HOME" && (
+        <MaxHomeShop
+          coins={gameState.coins}
+          level={gameState.level}
+          ownedIds={gameState.buildings?.MAX_HOME || []}
+          onBuy={handleBuyMaxHomeFurniture}
+          onClose={() => setShowMaxHomeShop(false)}
+        />
       )}
 
       {/* Help Instructions popup Overlay */}

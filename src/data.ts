@@ -4,6 +4,7 @@
  */
 
 import { AnimalConfig, AnimalSpecies, CropConfig, CropType, TreeConfig, TreeType, LocationConfig, LocationId, PlayerState, FarmUpgrade, BuildingConfig } from "./types";
+import { createInitialPenStates } from "./lib/penLogic";
 
 export const ANIMAL_TEMPLATES: Record<AnimalSpecies, AnimalConfig> = {
   [AnimalSpecies.CHICKEN]: {
@@ -285,6 +286,34 @@ export const ANIMAL_TEMPLATES: Record<AnimalSpecies, AnimalConfig> = {
     productIcon: "💛",
     description: "Двугорбый сильный верблюд. С радостью жует полезную чернику в пустыне.",
     soundType: "donkey"
+  },
+  [AnimalSpecies.PEACOCK]: {
+    species: AnimalSpecies.PEACOCK,
+    nameRu: "Павлин Павлик",
+    emoji: "🦚",
+    cost: 480,
+    foodType: "WHEAT",
+    foodNameRu: "Пшеница",
+    productionTime: 55,
+    productName: "Павлинье перо",
+    productPrice: 120,
+    productIcon: "🪶",
+    description: "Гордый павлин с радужным хвостом. Любит клевать зёрнышки и дарит красивые перья!",
+    soundType: "turkey"
+  },
+  [AnimalSpecies.SWAN]: {
+    species: AnimalSpecies.SWAN,
+    nameRu: "Лебедь Снежок",
+    emoji: "🦢",
+    cost: 380,
+    foodType: "CLOVER",
+    foodNameRu: "Клевер",
+    productionTime: 50,
+    productName: "Лебединое перо",
+    productPrice: 95,
+    productIcon: "🪶",
+    description: "Белоснежный лебедь у пруда. Обожает клевер и дарит пушистые перья.",
+    soundType: "goose"
   }
 };
 
@@ -381,10 +410,28 @@ export const LOCATIONS: Record<LocationId, LocationConfig> = {
   BARNYARD: {
     id: "BARNYARD",
     nameRu: "Уютный Загон",
-    description: "Просторная территория с деревянным забором, деревянным сарайчиком и теплым сеном для крупных животных.",
+    description: "Просторная территория с деревянным забором, сарайчиком и теплым сеном для крупных животных.",
     unlockCost: 0,
     isUnlocked: true,
     bgGradient: "from-amber-50 to-orange-100/80",
+    minLevel: 1
+  },
+  MAX_HOME: {
+    id: "MAX_HOME",
+    nameRu: "Дом Макса",
+    description: "Уютная комната Макса: кроватка, игрушки, рисунки на стене и место для кошки и собаки!",
+    unlockCost: 0,
+    isUnlocked: true,
+    bgGradient: "from-amber-100 to-orange-200",
+    minLevel: 1
+  },
+  GARDEN: {
+    id: "GARDEN",
+    nameRu: "Большой Огород",
+    description: "Уютный огород: 24 грядки в три ряда — всё видно на одном экране!",
+    unlockCost: 0,
+    isUnlocked: true,
+    bgGradient: "from-lime-100 to-emerald-200",
     minLevel: 1
   },
   LAKESIDE: {
@@ -431,6 +478,24 @@ export const LOCATIONS: Record<LocationId, LocationConfig> = {
     isUnlocked: false,
     bgGradient: "from-sky-200 to-indigo-100",
     minLevel: 12
+  },
+  HILLS: {
+    id: "HILLS",
+    nameRu: "Ветреные Холмы",
+    description: "Высокие зелёные холмы с панорамным видом на ферму. Идеально для лошадей, овечек и павлинов.",
+    unlockCost: 15000,
+    isUnlocked: false,
+    bgGradient: "from-lime-100 to-emerald-200",
+    minLevel: 14
+  },
+  VALLEY: {
+    id: "VALLEY",
+    nameRu: "Луговая Долина",
+    description: "Широкая солнечная долина с ручьём и цветами — простор для всех семей зверушек!",
+    unlockCost: 18000,
+    isUnlocked: false,
+    bgGradient: "from-green-100 to-teal-100",
+    minLevel: 16
   }
 };
 
@@ -474,6 +539,36 @@ export const UPGRADES: Record<string, FarmUpgrade> = {
     maxLevel: 5,
     multiplier: 1.10,
     icon: "📈"
+  },
+  dripIrrigation: {
+    id: "dripIrrigation",
+    nameRu: "Капельный Полив",
+    description: "Шланг с капельницами сам поливает до 2 сухих грядок за уровень каждую секунду на огороде.",
+    cost: 280,
+    level: 0,
+    maxLevel: 3,
+    multiplier: 1.0,
+    icon: "💧"
+  },
+  richCompost: {
+    id: "richCompost",
+    nameRu: "Компостная Куча",
+    description: "Плодородный компост даёт +1 урожай с каждой собранной грядки за уровень (до +2).",
+    cost: 350,
+    level: 0,
+    maxLevel: 2,
+    multiplier: 1.0,
+    icon: "🪴"
+  },
+  gardenGreenhouse: {
+    id: "gardenGreenhouse",
+    nameRu: "Теплица",
+    description: "Под стеклянной крышей растения созревают на 12% быстрее за каждый уровень.",
+    cost: 420,
+    level: 0,
+    maxLevel: 4,
+    multiplier: 1.12,
+    icon: "🏡"
   }
 };
 
@@ -490,6 +585,19 @@ export const WORKER_DESCRIPTIONS: Record<string, string> = {
   "worker-misha": "Пасёт овечек в лесу и помогает их стричь, когда шерсть готова.",
   "worker-masha": "Ночью находит падающие звёзды и приносит монетки.",
   "worker-sergey": "Чинит постройки и помогает дедушке Андрею в саду.",
+  "worker-pastuh": "Следит за загонами: загоняет разбежавшихся зверушек обратно в огороженный дворик.",
+  "worker-kolya": "Помогает бабушке Наде — поливает дополнительные грядки и ухаживает за рассадой.",
+  "worker-vera": "Поливает сухие грядки на огороде — отличный помощник с лейкой!",
+  "worker-fyodor": "Сажает нужные семена на пустые грядки — знает, чем кормить зверушек.",
+  "worker-sonya": "Собирает спелый урожай с грядок и складывает в рюкзак.",
+  "worker-grisha": "Юный поливальщик — бегает между рядками и не даёт растениям засохнуть.",
+  "worker-nina": "Собирает яйца и перья, следит за порядком в курятнике.",
+  "worker-olya": "Ухаживает за кроликами — кормит и собирает пушистые подарки.",
+  "worker-vika": "Следит за свинками: чистит и собирает их продукцию.",
+  "worker-igor": "Пасёт фенеков и верблюдов в пустыне, приносит монетки с оазиса.",
+  "worker-tolya": "Гладит динозавров и поднимает им настроение в лесу.",
+  "worker-zoya": "Кормит лебедей у озера и собирает перья и яйца.",
+  "worker-roman": "Живёт в доме Макса бесплатно: открывает магазин мебели и радует питомцев.",
 };
 
 export const INITIAL_STATE: PlayerState = {
@@ -530,12 +638,15 @@ export const INITIAL_STATE: PlayerState = {
     treePlot1: { id: "treePlot1", type: "APPLE", fruitProgress: 0, fruitCount: 0, timeRemaining: 80 },
     treePlot2: { id: "treePlot2", type: "CHERRY", fruitProgress: 0, fruitCount: 0, timeRemaining: 120 }
   },
-  unlockedLocations: ["MEADOW", "BARNYARD"],
+  unlockedLocations: ["MEADOW", "BARNYARD", "GARDEN", "MAX_HOME"],
   upgrades: {
     brushTool: 1,
     autoFeeder: 1,
     goldenSpade: 1,
-    marketContract: 1
+    marketContract: 1,
+    dripIrrigation: 0,
+    richCompost: 0,
+    gardenGreenhouse: 0,
   },
   stats: {
     totalCoinsEarned: 100,
@@ -548,7 +659,7 @@ export const INITIAL_STATE: PlayerState = {
     {
       id: "worker-papa",
       name: "Папа Андрей",
-      emoji: "🧔🏽‍♂️",
+      emoji: "👨🏼‍🦱",
       roleRu: "Главный Строитель",
       dailyWage: 50,
       isActive: false,
@@ -576,7 +687,7 @@ export const INITIAL_STATE: PlayerState = {
       isActive: false,
       color: "from-emerald-400 to-teal-500",
       statusText: "Готовит рассаду (поливает сухие грядки и сажает пшеницу)",
-      assignedLocationId: "BARNYARD"
+      assignedLocationId: "GARDEN"
     },
     {
       id: "worker-lena",
@@ -676,16 +787,165 @@ export const INITIAL_STATE: PlayerState = {
       color: "from-stone-400 to-slate-500",
       statusText: "Чинит постройки и помогает дедушке с деревьями",
       assignedLocationId: "ORCHARD"
+    },
+    {
+      id: "worker-pastuh",
+      name: "Пастух Ваня",
+      emoji: "🤠",
+      roleRu: "Смотритель Загонов",
+      dailyWage: 36,
+      isActive: false,
+      color: "from-amber-500 to-yellow-600",
+      statusText: "Загоняет зверушек обратно в огороженные дворики",
+      assignedLocationId: "MEADOW"
+    },
+    {
+      id: "worker-kolya",
+      name: "Коля Помощник",
+      emoji: "👦",
+      roleRu: "Юный Садовник",
+      dailyWage: 22,
+      isActive: false,
+      color: "from-lime-500 to-green-600",
+      statusText: "Поливает дополнительные грядки на огороде",
+      assignedLocationId: "GARDEN"
+    },
+    {
+      id: "worker-vera",
+      name: "Тётя Вера",
+      emoji: "👩‍🌾",
+      roleRu: "Поливальщица",
+      dailyWage: 26,
+      isActive: false,
+      color: "from-sky-400 to-cyan-500",
+      statusText: "Поливает сухие грядки лейкой",
+      assignedLocationId: "GARDEN"
+    },
+    {
+      id: "worker-fyodor",
+      name: "Дед Фёдор",
+      emoji: "👴",
+      roleRu: "Сеятель",
+      dailyWage: 32,
+      isActive: false,
+      color: "from-amber-500 to-orange-600",
+      statusText: "Сажает семена на пустые грядки",
+      assignedLocationId: "GARDEN"
+    },
+    {
+      id: "worker-sonya",
+      name: "Сонечка",
+      emoji: "👧",
+      roleRu: "Сборщица Урожая",
+      dailyWage: 28,
+      isActive: false,
+      color: "from-yellow-400 to-amber-500",
+      statusText: "Собирает спелые овощи с грядок",
+      assignedLocationId: "GARDEN"
+    },
+    {
+      id: "worker-grisha",
+      name: "Гришка",
+      emoji: "🧒",
+      roleRu: "Огородник",
+      dailyWage: 24,
+      isActive: false,
+      color: "from-green-400 to-lime-500",
+      statusText: "Помогает поливать дальние рядки",
+      assignedLocationId: "GARDEN"
+    },
+    {
+      id: "worker-nina",
+      name: "Тётя Нина",
+      emoji: "👩‍🌾",
+      roleRu: "Хозяйка Курятника",
+      dailyWage: 28,
+      isActive: false,
+      color: "from-rose-400 to-pink-500",
+      statusText: "Собирает яйца и следит за птицами в загоне",
+      assignedLocationId: "MEADOW"
+    },
+    {
+      id: "worker-olya",
+      name: "Оля Крольчиха",
+      emoji: "👧",
+      roleRu: "Кроличья Няня",
+      dailyWage: 24,
+      isActive: false,
+      color: "from-pink-300 to-rose-400",
+      statusText: "Кормит кроликов и собирает пушистые сюрпризы",
+      assignedLocationId: "MEADOW"
+    },
+    {
+      id: "worker-vika",
+      name: "Вика Свинарка",
+      emoji: "👩",
+      roleRu: "Хозяйка Свинарника",
+      dailyWage: 30,
+      isActive: false,
+      color: "from-orange-300 to-amber-500",
+      statusText: "Чистит свинок и собирает их продукцию",
+      assignedLocationId: "BARNYARD"
+    },
+    {
+      id: "worker-igor",
+      name: "Игорь Степняк",
+      emoji: "🧔",
+      roleRu: "Хранитель Пустыни",
+      dailyWage: 34,
+      isActive: false,
+      color: "from-yellow-500 to-amber-600",
+      statusText: "Ухаживает за фенеками и верблюдами в оазисе",
+      assignedLocationId: "DESERT"
+    },
+    {
+      id: "worker-tolya",
+      name: "Толя Динозавролог",
+      emoji: "👨‍🔬",
+      roleRu: "Палеонтолог",
+      dailyWage: 40,
+      isActive: false,
+      color: "from-emerald-500 to-teal-600",
+      statusText: "Гладит динозавров и следит за их настроением",
+      assignedLocationId: "FOREST"
+    },
+    {
+      id: "worker-zoya",
+      name: "Зоя Лебедь",
+      emoji: "👩‍🦰",
+      roleRu: "Хранительница Озера",
+      dailyWage: 32,
+      isActive: false,
+      color: "from-sky-300 to-blue-400",
+      statusText: "Кормит лебедей и собирает перья у воды",
+      assignedLocationId: "LAKE"
+    },
+    {
+      id: "worker-roman",
+      name: "Роман Домовой",
+      emoji: "🧹",
+      roleRu: "Домовой в доме Макса",
+      dailyWage: 0,
+      isActive: true,
+      isBundledWithHome: true,
+      color: "from-amber-300 to-orange-400",
+      statusText: "Живёт в доме Макса — продаёт мебель и убирается",
+      assignedLocationId: "MAX_HOME"
     }
   ],
+  pens: createInitialPenStates(),
   buildings: {
     MEADOW: [],
     BARNYARD: [],
+    MAX_HOME: [],
+    GARDEN: [],
     LAKESIDE: [],
     ORCHARD: [],
     DESERT: [],
     FOREST: [],
-    LAKE: []
+    LAKE: [],
+    HILLS: [],
+    VALLEY: []
   }
 };
 
@@ -736,6 +996,52 @@ export const BUILDINGS_TEMPLATES: Record<LocationId, BuildingConfig[]> = {
       benefitRu: "Дает дом питомцам. Повышает весь доход и опыт фермы на 30%!",
       x: 22,
       y: 42
+    }
+  ],
+  GARDEN: [
+    {
+      id: "garden_scarecrow",
+      nameRu: "Пугало",
+      emoji: "🧑‍🌾",
+      cost: 180,
+      minLevel: 2,
+      description: "Доброе пугало охраняет грядки от вредителей.",
+      benefitRu: "Грядки не засыхают, если забыли полить",
+      x: 18,
+      y: 42
+    },
+    {
+      id: "garden_well",
+      nameRu: "Колодец",
+      emoji: "🪣",
+      cost: 320,
+      minLevel: 3,
+      description: "Свежая вода для полива всего огорода.",
+      benefitRu: "Полив грядок даёт +5 XP",
+      x: 32,
+      y: 44
+    },
+    {
+      id: "garden_shed",
+      nameRu: "Сарай Огородника",
+      emoji: "🏚️",
+      cost: 550,
+      minLevel: 4,
+      description: "Тут хранятся лопатки, грабли и мешки с семенами.",
+      benefitRu: "Семена при сборе урожая +1 бесплатно",
+      x: 78,
+      y: 44
+    },
+    {
+      id: "garden_autowater",
+      nameRu: "Система Автополива",
+      emoji: "💦",
+      cost: 420,
+      minLevel: 2,
+      description: "Дождевальные форсунки по всему огороду — вода льётся сама!",
+      benefitRu: "Автоматически поливает до 5 сухих грядок каждую секунду",
+      x: 52,
+      y: 40
     }
   ],
   LAKESIDE: [
@@ -802,6 +1108,33 @@ export const BUILDINGS_TEMPLATES: Record<LocationId, BuildingConfig[]> = {
       x: 83,
       y: 40
     }
+  ],
+  MAX_HOME: [],
+  HILLS: [
+    {
+      id: "hills_windmill",
+      nameRu: "Холмистая Мельница",
+      emoji: "🌬️",
+      cost: 2400,
+      minLevel: 14,
+      description: "Ветряная мельница на вершине холма.",
+      benefitRu: "Овечки на холмах производят шерсть на 15% быстрее",
+      x: 20,
+      y: 42
+    }
+  ],
+  VALLEY: [
+    {
+      id: "valley_bridge",
+      nameRu: "Каменный Мостик",
+      emoji: "🌉",
+      cost: 2800,
+      minLevel: 16,
+      description: "Красивый мост через ручей в долине.",
+      benefitRu: "Все животные в долине получают +12 к счастью",
+      x: 50,
+      y: 48
+    }
   ]
 };
 
@@ -810,6 +1143,7 @@ export function loadSavedGameState(): PlayerState {
   const fallback = (): PlayerState => ({
     ...INITIAL_STATE,
     workers: INITIAL_STATE.workers?.map((w) => ({ ...w })),
+    pens: createInitialPenStates(),
   });
 
   try {
@@ -826,6 +1160,9 @@ export function loadSavedGameState(): PlayerState {
           .map((w) => [(w as { id: string; isActive?: boolean }).id, w as { id: string; isActive?: boolean }])
       );
       workers = INITIAL_STATE.workers!.map((template) => {
+        if (template.isBundledWithHome) {
+          return { ...template, isActive: true };
+        }
         const savedWorker = savedById.get(template.id);
         if (!savedWorker) return { ...template };
         return {
@@ -852,12 +1189,43 @@ export function loadSavedGameState(): PlayerState {
           ? [...parsed.unlockedLocations]
           : [...INITIAL_STATE.unlockedLocations];
         if (!locs.includes("BARNYARD")) locs.push("BARNYARD");
+        if (!locs.includes("GARDEN")) locs.push("GARDEN");
+        if (!locs.includes("MAX_HOME")) locs.push("MAX_HOME");
         return locs;
       })(),
-      upgrades: parsed.upgrades && typeof parsed.upgrades === "object" ? parsed.upgrades : { ...INITIAL_STATE.upgrades },
+      upgrades: parsed.upgrades && typeof parsed.upgrades === "object"
+        ? { ...INITIAL_STATE.upgrades, ...parsed.upgrades }
+        : { ...INITIAL_STATE.upgrades },
       stats: parsed.stats && typeof parsed.stats === "object" ? { ...INITIAL_STATE.stats, ...parsed.stats } : { ...INITIAL_STATE.stats },
-      buildings: parsed.buildings && typeof parsed.buildings === "object" ? parsed.buildings : { ...INITIAL_STATE.buildings },
+      buildings: parsed.buildings && typeof parsed.buildings === "object"
+        ? {
+            ...INITIAL_STATE.buildings,
+            ...parsed.buildings,
+            GARDEN: parsed.buildings.GARDEN ?? [],
+            MAX_HOME: parsed.buildings.MAX_HOME ?? [],
+            HILLS: parsed.buildings.HILLS ?? [],
+            VALLEY: parsed.buildings.VALLEY ?? [],
+          }
+        : { ...INITIAL_STATE.buildings },
       workers,
+      pens: (() => {
+        const defaults = createInitialPenStates();
+        if (!Array.isArray(parsed.pens) || parsed.pens.length === 0) return defaults;
+        const savedById = new Map(
+          parsed.pens
+            .filter((p) => !!p && typeof (p as { templateId?: string }).templateId === "string")
+            .map((p) => [(p as { templateId: string }).templateId, p as { templateId: string; isOwned?: boolean; isOpen?: boolean }])
+        );
+        return defaults.map((template) => {
+          const saved = savedById.get(template.templateId);
+          if (!saved) return { ...template };
+          return {
+            ...template,
+            isOwned: saved.isOwned ?? false,
+            isOpen: saved.isOpen ?? true,
+          };
+        });
+      })(),
       day: typeof parsed.day === "number" ? parsed.day : 1,
       dayProgress: typeof parsed.dayProgress === "number" ? parsed.dayProgress : 0,
     };
