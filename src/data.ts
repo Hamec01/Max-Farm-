@@ -143,7 +143,7 @@ export const ANIMAL_TEMPLATES: Record<AnimalSpecies, AnimalConfig> = {
     productionTime: 110,
     productName: "Подкова удачи",
     productPrice: 850,
-    productIcon: "🪙",
+    productIcon: "horseshoe",
     description: "Славный ушастый ослик. Любит яблочки и дарит подковы на счастье.",
     soundType: "donkey"
   },
@@ -528,7 +528,7 @@ export const UPGRADES: Record<string, FarmUpgrade> = {
     level: 1,
     maxLevel: 5,
     multiplier: 1.15,
-    icon: "🪙"
+    icon: "coin"
   },
   marketContract: {
     id: "marketContract",

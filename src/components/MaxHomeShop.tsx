@@ -1,6 +1,7 @@
 import React from "react";
 import { MAX_HOME_FURNITURE } from "../data/maxHomeFurniture";
 import { playClickSound } from "../lib/audio";
+import { CoinPrice } from "./CoinIcon";
 
 interface MaxHomeShopProps {
   coins: number;
@@ -43,7 +44,9 @@ export const MaxHomeShop: React.FC<MaxHomeShopProps> = ({
         <p className="text-[10px] text-amber-800 font-bold mt-1">
           Обставь комнату Макса — покупай по одной вещи!
         </p>
-        <p className="text-[10px] font-black text-amber-700 mt-2">💰 {coins.toLocaleString()} монет</p>
+        <p className="text-[10px] font-black text-amber-700 mt-2">
+          <CoinPrice amount={coins} showLabel iconSize={12} />
+        </p>
       </div>
 
       <div className="space-y-2">
@@ -62,8 +65,8 @@ export const MaxHomeShop: React.FC<MaxHomeShopProps> = ({
                 <h4 className="font-extrabold text-sm text-slate-900">{item.nameRu}</h4>
                 <p className="text-[9px] text-slate-600 mt-0.5 line-clamp-2">{item.description}</p>
                 <p className="text-[8px] text-emerald-800 font-bold mt-0.5">{item.benefitRu}</p>
-                <p className="text-[9px] text-amber-800 font-black mt-1">
-                  Ур. {item.minLevel}+ · {item.cost} 🪙
+                <p className="text-[9px] text-amber-800 font-black mt-1 inline-flex items-center gap-0.5">
+                  Ур. {item.minLevel}+ · <CoinPrice amount={item.cost} iconSize={11} />
                 </p>
               </div>
               <div className="shrink-0">

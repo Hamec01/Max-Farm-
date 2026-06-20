@@ -7,6 +7,7 @@ import React, { useState } from "react";
 import { AnimalInstance, AnimalSpecies } from "../types";
 import { ANIMAL_TEMPLATES } from "../data";
 import { AnimalSVG } from "./AnimalSVG";
+import { GameIcon } from "./CoinIcon";
 import { Heart, Star, Sparkles, Pencil, Check, RefreshCw, Scissors, Milk, Volume2, Trash2 } from "lucide-react";
 import {
   playAnimalSound,
@@ -225,7 +226,7 @@ export const AnimalCard: React.FC<AnimalCardProps> = ({
       <div className="space-y-1 mb-2.5" id="production-tracker">
         <div className="flex justify-between text-xs font-black text-[#92400E]">
           <span className="flex items-center gap-1">
-            <span>{template.productIcon}</span>
+            <GameIcon icon={template.productIcon} size={14} />
             <span>{template.productName}:</span>
           </span>
           <span>{Math.floor(animal.productionProgress)}%</span>

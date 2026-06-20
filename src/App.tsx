@@ -7,6 +7,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { PlayerState, AnimalSpecies, LocationId, CropType, TreeType, AnimalInstance, CropInstance, TreeInstance, Butterfly, FallingStar } from "./types";
 import { INITIAL_STATE, ANIMAL_TEMPLATES, CROPS_CONFIG, TREES_CONFIG, LOCATIONS, UPGRADES, BUILDINGS_TEMPLATES, WORKER_DESCRIPTIONS, loadSavedGameState } from "./data";
 import { GameHeader } from "./components/GameHeader";
+import { CoinIcon, CoinPrice, FloatParticle, GameIcon } from "./components/CoinIcon";
+import { AnimalShopIcon, SkillIcon } from "./components/ShopIcons";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { AnimalSVG } from "./components/AnimalSVG";
 import {
@@ -109,7 +111,7 @@ const PLOT_COSTS: Record<string, number> = {
 const ALL_PLOT_IDS = GARDEN_PLOT_IDS;
 
 export default function App() {
-  const { zoomScale, viewportHeightPx, deviceKind } = useGameViewport();
+  const { zoomScale, deviceKind } = useGameViewport();
   const isPhone = deviceKind === "phone";
 
   // Load state from local storage or use initial state
@@ -2776,7 +2778,7 @@ export default function App() {
       }
 
       triggerNotification(`💰 Потрясающе! Продано всего добра на сумму ${totalEarned} монет! 🪙`);
-      spawnFloatHeart(20, 40, "🪙");
+      spawnFloatHeart(20, 40, "coin");
 
       return {
         ...prev,
@@ -3120,17 +3122,15 @@ export default function App() {
 
   return (
     <div
-      className={`min-h-[100dvh] bg-[#FFFEEF] flex flex-col font-sans transition-all duration-500 overflow-x-hidden ${
-        isPhone ? "pb-0" : "pb-12"
-      }`}
+      className="h-[100dvh] min-h-[100dvh] bg-[#FFFEEF] flex flex-col font-sans transition-all duration-500 overflow-hidden"
       id="root-viewport-game"
     >
       {/* HUD Header bar has been integrated directly "above the sky" inside the pasture viewport below! */}
 
-      <main className="w-full max-w-none mt-0 flex flex-col gap-0 sm:gap-4 animate-fade-in flex-1" id="main-farm-container">
+      <main className="w-full max-w-none mt-0 flex flex-col gap-0 animate-fade-in flex-1 min-h-0" id="main-farm-container">
         
         {/* WALKING WORLD VIEWPORT CANVAS - FULL BLEED RESIZING FOR ALL SCREENS */}
-        <div className="relative w-full shadow-lg flex-1" id="playground-viewport-wrapper">
+        <div className="relative w-full shadow-lg flex-1 min-h-0 h-full" id="playground-viewport-wrapper">
           <div
             onPointerDown={(e) => {
               if (e.pointerType === "touch" && !(e.target as HTMLElement).closest(".interactive-element")) {
@@ -3149,12 +3149,9 @@ export default function App() {
               }
             }}
             style={{
-                height: `${viewportHeightPx}px`,
                 transition: "height 280ms ease-out",
               }}
-            className={`w-full rounded-none sm:rounded-3xl relative overflow-hidden transition-[background-color,box-shadow] duration-[1000ms] select-none touch-none ${
-              isPhone ? "max-h-[100dvh]" : ""
-            } ${
+            className={`w-full h-full min-h-0 rounded-none relative overflow-hidden transition-[background-color,box-shadow] duration-[1000ms] select-none touch-none ${
               isNight
                 ? "bg-gradient-to-b from-[#0F172A] via-[#1E1B4B] to-[#2E1065]"
                 : "bg-gradient-to-b from-sky-400 to-sky-300"
@@ -3403,7 +3400,7 @@ export default function App() {
             {activeZone === "BARNYARD" && (
               <div className="absolute inset-x-0 bottom-10 pointer-events-none select-none opacity-40 flex justify-around z-0" id="hayyard-decor">
                 <div className="w-10 h-8 bg-amber-400 rounded-md border-b-2 border-amber-900/40 shadow flex items-center justify-center text-xs text-amber-900 font-bold">🌾</div>
-                <div className="w-10 h-8 bg-amber-400 rounded-md border-b-2 border-amber-900/40 shadow flex items-center justify-center text-xs text-amber-900 font-bold">🟨</div>
+                <div className="w-10 h-8 bg-amber-400 rounded-md border-b-2 border-amber-900/40 shadow flex items-center justify-center text-xs text-amber-900 font-bold">🌾</div>
                 <div className="w-10 h-8 bg-amber-400 rounded-md border-b-2 border-amber-900/40 shadow flex items-center justify-center text-xs text-amber-900 font-bold">🌾</div>
               </div>
             )}
@@ -3648,8 +3645,8 @@ export default function App() {
                     >
                       <span className="text-xl">🪵</span>
                       <span className="text-[7.5px] font-black text-amber-950 uppercase tracking-tight mt-0.5 leading-none">вспахать</span>
-                      <span className="text-[8.5px] font-extrabold text-amber-900 bg-amber-200/90 rounded px-1 mt-1 leading-none border border-amber-300 select-none">
-                        {cost}🪙
+                      <span className="text-[8.5px] font-extrabold text-amber-900 bg-amber-200/90 rounded px-1 mt-1 leading-none border border-amber-300 select-none inline-flex items-center gap-0.5">
+                        <CoinPrice amount={cost} iconSize={10} />
                       </span>
                       <span className="absolute -bottom-2.5 bg-stone-700 text-stone-100 border border-stone-604 text-[8px] p-0.5 px-1.5 rounded-full font-black scale-90 select-none">
                         Рядок {plotId.replace("plot", "")}
@@ -4246,7 +4243,7 @@ export default function App() {
                   top: `${heart.y}%`,
                 }}
               >
-                {heart.emoji}
+                <FloatParticle text={heart.emoji} />
               </span>
             ))}
 
@@ -4290,7 +4287,9 @@ export default function App() {
                             onClick={(e) => { e.stopPropagation(); buyPlot(selectedPlotId); }}
                             className="w-full mt-2 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-black rounded-lg cursor-pointer uppercase shadow flex items-center justify-center gap-1 active:scale-95 transition-transform"
                           >
-                            <span>🌱 ВСПАХАТЬ ЗА {PLOT_COSTS[selectedPlotId]} 🪙</span>
+                            <span className="inline-flex items-center gap-1">
+                              🌱 ВСПАХАТЬ ЗА <CoinPrice amount={PLOT_COSTS[selectedPlotId]} iconSize={12} />
+                            </span>
                           </button>
                         </div>
                       ) : crop.progress > 0 ? (
@@ -4678,9 +4677,17 @@ export default function App() {
                       : "bg-white text-[#6B3F23] border-transparent hover:bg-amber-50"
                   }`}
                 >
-                  {tab === "sell" && "💰 Сбыт"}
+                  {tab === "sell" && (
+                    <span className="inline-flex items-center justify-center gap-0.5">
+                      <CoinIcon size={12} /> Сбыт
+                    </span>
+                  )}
                   {tab === "animals" && "🐣 Зверята"}
-                  {tab === "upgrades" && "🪄 Навыки"}
+                  {tab === "upgrades" && (
+                    <span className="inline-flex items-center justify-center gap-0.5">
+                      <SkillIcon size={12} /> Навыки
+                    </span>
+                  )}
                   {tab === "lands" && "🗺️ Карта"}
                   {tab === "workers" && "💼 Рабочие"}
                   {tab === "pens" && "🚧 Загоны"}
@@ -4693,7 +4700,7 @@ export default function App() {
               <div className="space-y-2 lg:space-y-4">
                 {/* GIANT SATISFYING BUTTON TO SELL ALL FOR KIDS */}
                 <div className="bg-yellow-400/90 border-2 lg:border-4 border-yellow-600 rounded-xl lg:rounded-[24px] p-2 lg:p-4 text-center shadow-lg transform hover:scale-102 transition-transform">
-                  <span className="text-2xl lg:text-4xl block animate-bounce-slow">🪙</span>
+                  <CoinIcon className="mx-auto animate-bounce-slow" size={40} />
                   <p className="text-[9px] lg:text-xs text-amber-950 font-black mt-0.5 lg:mt-1 uppercase tracking-wide">Самая крутая кнопка на ферме:</p>
                   <button
                     onClick={handleSellAllProducts}
@@ -4733,7 +4740,8 @@ export default function App() {
                     return (
                       <div key={key} className="bg-white p-1.5 lg:p-2.5 rounded-xl lg:rounded-2xl border-2 border-[#6B3F23]/15 flex items-center justify-between shadow-xs">
                         <div className="flex items-center gap-1.5 lg:gap-2">
-                          <span className="text-2xl lg:text-3xl select-none">{icon}</span>
+                          <GameIcon icon={icon} size={28} className="lg:hidden" />
+                          <GameIcon icon={icon} size={32} className="hidden lg:block" />
                           <div>
                             <h4 className="font-black text-[10px] lg:text-xs text-[#6B3F23]">{nameRu}</h4>
                             <p className="text-[8px] lg:text-[9px] text-gray-500 font-black">У тебя в заначе: {count} шт.</p>
@@ -4767,9 +4775,7 @@ export default function App() {
                       }`}
                     >
                       <div>
-                        <span className="text-2xl lg:text-4xl filter drop-shadow inline-block animate-bounce-slow mt-0.5 lg:mt-1 select-none">
-                          {config.emoji}
-                        </span>
+                        <AnimalShopIcon species={species} />
                         <h4 className="font-extrabold text-xs text-amber-950 mt-1 line-clamp-1 uppercase">
                           {config.nameRu.split(" ")[0]}
                         </h4>
@@ -4788,7 +4794,7 @@ export default function App() {
                               : "bg-slate-100 text-slate-400 border-dashed border border-slate-200 cursor-not-allowed"
                           }`}
                         >
-                          <Coins className="w-3 h-3 text-amber-700" />
+                          <CoinIcon size={12} />
                           <span>{config.cost} золотых</span>
                         </button>
                       </div>
@@ -4856,7 +4862,9 @@ export default function App() {
                     return (
                       <div key={id} className="bg-white p-2 lg:p-3 rounded-xl lg:rounded-2xl border-2 border-[#6B3F23]/15 flex items-center justify-between shadow-xs">
                         <div className="flex items-center gap-1.5 lg:gap-2.5">
-                          <span className="text-2xl lg:text-3xl bg-amber-50 p-1 lg:p-1.5 rounded-lg lg:rounded-xl border border-amber-100 select-none">{upgrade.icon}</span>
+                          <span className="text-2xl lg:text-3xl bg-amber-50 p-1 lg:p-1.5 rounded-lg lg:rounded-xl border border-amber-100 select-none inline-flex items-center justify-center">
+                            <GameIcon icon={upgrade.icon} size={28} />
+                          </span>
                           <div>
                             <h4 className="font-black text-xs text-[#6B3F23] flex items-center gap-1.5">
                               <span>{upgrade.nameRu}</span>
@@ -4880,7 +4888,7 @@ export default function App() {
                                   : "bg-slate-100 text-slate-400 border-dashed border border-slate-200 cursor-not-allowed opacity-75"
                               }`}
                             >
-                              <Coins className="w-3 h-3 text-amber-700" />
+                              <CoinIcon size={12} />
                               <span>{cost}м</span>
                             </button>
                           )}
@@ -5035,7 +5043,9 @@ export default function App() {
                           <p className="text-[9px] text-slate-500 leading-3.5 mt-1.5 max-w-[340px]">
                             {WORKER_DESCRIPTIONS[worker.id] || worker.statusText}
                           </p>
-                          <div className="text-[9px] text-[#92400E] font-extrabold mt-1">Оплата: {worker.dailyWage} монет 🪙 / день</div>
+                          <div className="text-[9px] text-[#92400E] font-extrabold mt-1 inline-flex items-center gap-0.5">
+                            Оплата: <CoinPrice amount={worker.dailyWage} iconSize={10} /> / день
+                          </div>
                         </div>
                       </div>
                       <div className="w-full sm:w-auto mt-2 sm:mt-0 text-right">
@@ -5117,7 +5127,9 @@ export default function App() {
                       <div className="text-left">
                         <h4 className="font-extrabold text-xs text-slate-900">{penTpl.nameRu}</h4>
                         <p className="text-[9px] text-slate-500 mt-1">📍 {locName} · {animalLabel}</p>
-                        <p className="text-[9px] text-amber-800 font-bold mt-0.5">Уровень {penTpl.minLevel}+ · {penTpl.cost} 🪙</p>
+                        <p className="text-[9px] text-amber-800 font-bold mt-0.5 inline-flex items-center gap-0.5">
+                          Уровень {penTpl.minLevel}+ · <CoinPrice amount={penTpl.cost} iconSize={10} />
+                        </p>
                       </div>
                       <div className="shrink-0">
                         {owned ? (
@@ -5144,7 +5156,9 @@ export default function App() {
 
             {/* Dialogue footer statistics */}
             <div className="mt-2 lg:mt-4 pt-2 lg:pt-3.5 border-t-2 lg:border-t-4 border-dashed border-[#6B3F23]/15 flex justify-between items-center text-[8px] lg:text-[10px] text-[#6B3F23] font-black uppercase tracking-wider">
-              <span>Золотой баланс: <strong className="text-yellow-600">{gameState.coins} монет 🪙</strong></span>
+              <span className="inline-flex items-center gap-1">
+                Золотой баланс: <strong className="text-yellow-600 inline-flex items-center gap-0.5"><CoinPrice amount={gameState.coins} iconSize={11} showLabel /></strong>
+              </span>
               <span>Максим Фермер • Весело и Мирно!</span>
             </div>
           </div>

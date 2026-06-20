@@ -47,24 +47,12 @@ export function computeZoomScale(width: number, height: number, kind: DeviceKind
 }
 
 export function computeViewportHeight(
-  width: number,
+  _width: number,
   visibleHeight: number,
-  kind: DeviceKind
+  _kind: DeviceKind
 ): number {
-  if (kind === "phone") {
-    // В любой ориентации — ровно по видимой высоте экрана
-    return Math.round(Math.max(280, visibleHeight - 2));
-  }
-
-  if (kind === "tablet") {
-    const isLandscape = width > visibleHeight;
-    if (isLandscape) {
-      return Math.round(Math.min(visibleHeight - 8, Math.max(480, visibleHeight * 0.92)));
-    }
-    return Math.round(Math.min(visibleHeight - 12, Math.max(560, visibleHeight * 0.9)));
-  }
-
-  return Math.round(Math.max(640, Math.min(840, visibleHeight * 0.78, width * 0.48)));
+  // Вся видимая область — без пустой полосы снизу на ПК и планшете
+  return Math.round(Math.max(280, visibleHeight));
 }
 
 function readViewport(): GameViewport {

@@ -729,11 +729,17 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
       return (
         <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-trex">
           <ellipse cx="50" cy="85" rx="26" ry="6" fill="#1E3A1E" opacity="0.25" />
-          <circle cx="50" cy="56" r="26" fill="#15803D" stroke="#166534" strokeWidth="2" />
-          <path d="M 65 52 L 74 54 M 65 58 L 74 60" stroke="#14532D" strokeWidth="4" strokeLinecap="round" />
-          <ellipse cx="44" cy="55" rx="5" ry="6" fill="#14532D" opacity="0.1" />
-          <text x="50" y="55" textAnchor="middle" fontSize="48" dy=".35em">🦖</text>
-          {renderExpression()}
+          <path d="M 28 72 L 32 84 M 38 72 L 40 84 M 58 72 L 56 84 M 68 72 L 64 84" stroke="#166534" strokeWidth="4" strokeLinecap="round" />
+          <ellipse cx="52" cy="58" rx="24" ry="20" fill="#15803D" stroke="#166534" strokeWidth="2" />
+          <ellipse cx="72" cy="48" rx="16" ry="14" fill="#16A34A" stroke="#166534" strokeWidth="2" />
+          <path d="M 82 44 L 92 42 L 88 50 Z" fill="#14532D" />
+          <path d="M 74 52 L 78 58 L 70 56 Z" fill="#EF4444" />
+          <path d="M 78 52 L 82 58 L 74 56 Z" fill="#EF4444" />
+          <circle cx="76" cy="44" r="4" fill="#1E293B" />
+          <circle cx="77" cy="43" r="1.2" fill="#FFFFFF" />
+          <path d="M 38 54 L 44 58 M 42 54 L 48 58" stroke="#14532D" strokeWidth="3" strokeLinecap="round" />
+          <path d="M 44 62 Q 52 68 60 62" stroke="#14532D" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+          <g transform="translate(52, 58)">{renderExpression()}</g>
         </svg>
       );
 
@@ -741,9 +747,16 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
       return (
         <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-triceratops">
           <ellipse cx="50" cy="85" rx="28" ry="6" fill="#1E3A1E" opacity="0.25" />
-          <circle cx="48" cy="56" r="26" fill="#0D9488" stroke="#115E59" strokeWidth="2" />
-          <text x="48" y="55" textAnchor="middle" fontSize="48" dy=".35em">🦕</text>
-          {renderExpression()}
+          <ellipse cx="48" cy="62" rx="24" ry="16" fill="#0D9488" stroke="#115E59" strokeWidth="2" />
+          <ellipse cx="34" cy="50" rx="14" ry="12" fill="#14B8A6" stroke="#115E59" strokeWidth="1.5" />
+          <path d="M 22 44 L 16 28 L 24 38 Z" fill="#F59E0B" stroke="#D97706" strokeWidth="1" />
+          <path d="M 30 40 L 28 22 L 34 34 Z" fill="#FBBF24" stroke="#D97706" strokeWidth="1" />
+          <path d="M 38 38 L 40 20 L 42 36 Z" fill="#F59E0B" stroke="#D97706" strokeWidth="1" />
+          <path d="M 18 48 Q 14 56 20 58 Q 28 62 34 54" fill="#0F766E" stroke="#115E59" strokeWidth="1" />
+          <circle cx="28" cy="46" r="3.5" fill="#1E293B" />
+          <circle cx="29" cy="45" r="1" fill="#FFFFFF" />
+          <path d="M 22 54 L 28 56" stroke="#78350F" strokeWidth="2" strokeLinecap="round" />
+          <g transform="translate(48, 58)">{renderExpression()}</g>
         </svg>
       );
 
@@ -751,9 +764,14 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
       return (
         <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-pterodactyl">
           <ellipse cx="50" cy="85" rx="24" ry="5" fill="#1E3A1E" opacity="0.2" />
-          <circle cx="50" cy="55" r="25" fill="#B45309" stroke="#78350F" strokeWidth="2" />
-          <text x="50" y="53" textAnchor="middle" fontSize="48" dy=".35em">🦅</text>
-          {renderExpression()}
+          <path d="M 10 58 Q 30 42 48 52 Q 66 62 90 48" fill="#D97706" stroke="#92400E" strokeWidth="1.5" opacity="0.85" />
+          <path d="M 10 58 Q 24 68 38 58" fill="#B45309" stroke="#92400E" strokeWidth="1" />
+          <path d="M 90 48 Q 76 62 62 54" fill="#B45309" stroke="#92400E" strokeWidth="1" />
+          <ellipse cx="52" cy="52" rx="10" ry="8" fill="#F59E0B" stroke="#D97706" strokeWidth="1.5" />
+          <path d="M 58 50 L 66 48 L 62 54 Z" fill="#FBBF24" stroke="#D97706" strokeWidth="1" />
+          <circle cx="54" cy="50" r="2.5" fill="#1E293B" />
+          <circle cx="55" cy="49" r="0.8" fill="#FFFFFF" />
+          <g transform="translate(52, 54)">{renderExpression()}</g>
         </svg>
       );
 
@@ -761,9 +779,14 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
       return (
         <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-diplodocus">
           <ellipse cx="50" cy="85" rx="28" ry="6" fill="#1E3A1E" opacity="0.25" />
-          <circle cx="48" cy="56" r="26" fill="#0891B2" stroke="#0E7490" strokeWidth="2" />
-          <text x="48" y="55" textAnchor="middle" fontSize="48" dy=".35em">🦕</text>
-          {renderExpression()}
+          <path d="M 18 70 Q 14 62 18 54 Q 22 46 28 42 Q 34 38 42 40" stroke="#0891B2" strokeWidth="10" fill="none" strokeLinecap="round" />
+          <ellipse cx="48" cy="58" rx="22" ry="14" fill="#06B6D4" stroke="#0E7490" strokeWidth="2" />
+          <ellipse cx="44" cy="48" rx="10" ry="8" fill="#22D3EE" stroke="#0E7490" strokeWidth="1.5" />
+          <circle cx="40" cy="46" r="2.5" fill="#1E293B" />
+          <circle cx="41" cy="45" r="0.8" fill="#FFFFFF" />
+          <path d="M 36 50 L 32 52" stroke="#78350F" strokeWidth="2" strokeLinecap="round" />
+          <path d="M 62 66 L 68 78 M 72 66 L 76 78 M 78 66 L 82 78" stroke="#0E7490" strokeWidth="3" strokeLinecap="round" />
+          <g transform="translate(48, 56)">{renderExpression()}</g>
         </svg>
       );
 
@@ -771,14 +794,19 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
       return (
         <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-fennec">
           <ellipse cx="50" cy="85" rx="24" ry="5" fill="#1E3A1E" opacity="0.25" />
-          <ellipse cx="48" cy="60" rx="22" ry="16" fill="#F59E0B" stroke="#D97706" strokeWidth="1.5" />
-          {/* Big ears */}
+          <ellipse cx="48" cy="62" rx="20" ry="14" fill="#F59E0B" stroke="#D97706" strokeWidth="1.5" />
           <path d="M 33 42 Q 15 15 38 32 Z" fill="#F59E0B" stroke="#D97706" strokeWidth="1.5" />
           <path d="M 34 39 Q 22 22 36 32 Z" fill="#FFD1DC" />
           <path d="M 63 42 Q 81 15 58 32 Z" fill="#F59E0B" stroke="#D97706" strokeWidth="1.5" />
           <path d="M 62 39 Q 74 22 60 32 Z" fill="#FFD1DC" />
-          <text x="48" y="58" textAnchor="middle" fontSize="42" dy=".35em">🦊</text>
-          {renderExpression()}
+          <ellipse cx="48" cy="58" rx="14" ry="11" fill="#FBBF24" stroke="#D97706" strokeWidth="1" />
+          <circle cx="42" cy="56" r="3" fill="#1E293B" />
+          <circle cx="54" cy="56" r="3" fill="#1E293B" />
+          <circle cx="43" cy="55" r="1" fill="#FFFFFF" />
+          <circle cx="55" cy="55" r="1" fill="#FFFFFF" />
+          <ellipse cx="48" cy="62" rx="4" ry="3" fill="#1E293B" />
+          <path d="M 44 66 Q 48 69 52 66" stroke="#92400E" strokeWidth="2" fill="none" strokeLinecap="round" />
+          <g transform="translate(48, 58)">{renderExpression()}</g>
         </svg>
       );
 
@@ -786,11 +814,15 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
       return (
         <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-camel">
           <ellipse cx="50" cy="85" rx="28" ry="7" fill="#1E3A1E" opacity="0.25" />
-          <ellipse cx="48" cy="62" rx="24" ry="17" fill="#D97706" stroke="#B45309" strokeWidth="2" />
-          <circle cx="38" cy="46" r="10" fill="#D97706" stroke="#B45309" strokeWidth="1.5" />
-          <circle cx="58" cy="46" r="10" fill="#D97706" stroke="#B45309" strokeWidth="1.5" />
-          <text x="48" y="60" textAnchor="middle" fontSize="42" dy=".35em">🐫</text>
-          {renderExpression()}
+          <ellipse cx="48" cy="64" rx="22" ry="15" fill="#D97706" stroke="#B45309" strokeWidth="2" />
+          <ellipse cx="38" cy="44" rx="9" ry="11" fill="#D97706" stroke="#B45309" strokeWidth="1.5" />
+          <ellipse cx="58" cy="44" rx="9" ry="11" fill="#D97706" stroke="#B45309" strokeWidth="1.5" />
+          <ellipse cx="48" cy="52" rx="12" ry="10" fill="#F59E0B" stroke="#B45309" strokeWidth="1" />
+          <circle cx="44" cy="50" r="2.5" fill="#1E293B" />
+          <circle cx="52" cy="50" r="2.5" fill="#1E293B" />
+          <path d="M 46 56 L 50 58 L 54 56" stroke="#78350F" strokeWidth="2" fill="none" strokeLinecap="round" />
+          <path d="M 34 72 L 38 82 M 42 72 L 44 82 M 54 72 L 52 82 M 62 72 L 58 82" stroke="#92400E" strokeWidth="3" strokeLinecap="round" />
+          <g transform="translate(48, 56)">{renderExpression()}</g>
         </svg>
       );
 
@@ -798,11 +830,17 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
       return (
         <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-peacock">
           <ellipse cx="50" cy="85" rx="22" ry="5" fill="#1E3A1E" opacity="0.25" />
-          <ellipse cx="42" cy="58" rx="18" ry="14" fill="#1D4ED8" stroke="#1E3A8A" strokeWidth="1.5" />
-          <path d="M 58 50 Q 78 30 72 55 Q 68 70 58 62 Z" fill="#059669" stroke="#047857" strokeWidth="1" />
-          <circle cx="36" cy="48" r="8" fill="#2563EB" stroke="#1E40AF" strokeWidth="1.5" />
-          <text x="48" y="58" textAnchor="middle" fontSize="36" dy=".35em">🦚</text>
-          {renderExpression()}
+          <ellipse cx="42" cy="60" rx="16" ry="12" fill="#1D4ED8" stroke="#1E3A8A" strokeWidth="1.5" />
+          <path d="M 58 50 Q 82 20 78 55 Q 74 72 58 64 Z" fill="#059669" stroke="#047857" strokeWidth="1" />
+          <circle cx="68" cy="38" r="8" fill="#2563EB" stroke="#1E40AF" strokeWidth="1" opacity="0.9" />
+          <circle cx="76" cy="48" r="6" fill="#10B981" stroke="#047857" strokeWidth="1" opacity="0.9" />
+          <circle cx="72" cy="58" r="5" fill="#F59E0B" stroke="#D97706" strokeWidth="1" opacity="0.85" />
+          <ellipse cx="34" cy="50" rx="10" ry="9" fill="#2563EB" stroke="#1E40AF" strokeWidth="1.5" />
+          <path d="M 26 52 L 20 54 L 24 48 Z" fill="#FBBF24" stroke="#D97706" strokeWidth="1" />
+          <circle cx="32" cy="48" r="2.5" fill="#1E293B" />
+          <path d="M 28 54 L 34 56" stroke="#78350F" strokeWidth="2" strokeLinecap="round" />
+          <path d="M 62 52 L 58 58" stroke="#047857" strokeWidth="3" strokeLinecap="round" />
+          <g transform="translate(42, 56)">{renderExpression()}</g>
         </svg>
       );
 
@@ -810,11 +848,14 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
       return (
         <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-swan">
           <ellipse cx="50" cy="85" rx="24" ry="6" fill="#1E3A1E" opacity="0.25" />
-          <ellipse cx="48" cy="62" rx="20" ry="15" fill="#FFFFFF" stroke="#E5E7EB" strokeWidth="2" />
-          <path d="M 58 48 Q 72 38 68 52" stroke="#F97316" strokeWidth="3" fill="none" strokeLinecap="round" />
-          <circle cx="36" cy="46" r="9" fill="#FFFFFF" stroke="#D1D5DB" strokeWidth="1.5" />
-          <text x="48" y="58" textAnchor="middle" fontSize="38" dy=".35em">🦢</text>
-          {renderExpression()}
+          <ellipse cx="48" cy="64" rx="18" ry="13" fill="#FFFFFF" stroke="#E5E7EB" strokeWidth="2" />
+          <path d="M 58 48 Q 78 36 72 52 Q 68 58 58 54" stroke="#F97316" strokeWidth="3.5" fill="none" strokeLinecap="round" />
+          <ellipse cx="36" cy="48" rx="11" ry="10" fill="#FFFFFF" stroke="#D1D5DB" strokeWidth="1.5" />
+          <circle cx="32" cy="46" r="2.5" fill="#1E293B" />
+          <circle cx="33" cy="45" r="0.8" fill="#FFFFFF" />
+          <path d="M 28 50 L 22 51 L 26 47 Z" fill="#F97316" stroke="#EA580C" strokeWidth="1" />
+          <path d="M 38 72 L 42 82 M 48 72 L 48 82 M 58 72 L 54 82" stroke="#CBD5E1" strokeWidth="2.5" strokeLinecap="round" />
+          <g transform="translate(48, 58)">{renderExpression()}</g>
         </svg>
       );
 

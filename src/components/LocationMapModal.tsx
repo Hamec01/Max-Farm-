@@ -3,6 +3,7 @@ import { LocationId } from "../types";
 import { LOCATIONS } from "../data";
 import { HEADER_LOCATION_ORDER, LOCATION_EMOJI, isInteriorZone } from "../data/locations";
 import { playClickSound } from "../lib/audio";
+import { CoinPrice } from "./CoinIcon";
 
 interface LocationMapModalProps {
   activeLocationId: LocationId;
@@ -142,8 +143,8 @@ export const LocationMapModal: React.FC<LocationMapModalProps> = ({
                   <span className="text-[9px] sm:text-[10px] font-black text-[#5C3A21] leading-tight">{loc.nameRu}</span>
                 </div>
                 {!isUnlocked && (
-                  <p className="text-[8px] font-bold text-stone-600 mt-1 leading-tight">
-                    Ур. {loc.minLevel} · {loc.unlockCost}🪙
+                  <p className="text-[8px] font-bold text-stone-600 mt-1 leading-tight inline-flex items-center gap-0.5 flex-wrap">
+                    Ур. {loc.minLevel} · <CoinPrice amount={loc.unlockCost} iconSize={10} />
                     {canAfford ? " ✓" : ""}
                   </p>
                 )}

@@ -8,6 +8,7 @@ import { LocationId } from "../types";
 import { LOCATIONS } from "../data";
 import { playClickSound } from "../lib/audio";
 import { LOCATION_EMOJI } from "../data/locations";
+import { CoinIcon } from "./CoinIcon";
 
 interface GameHeaderProps {
   coins: number;
@@ -105,7 +106,8 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
         </div>
 
         <div className="bg-amber-50/95 backdrop-blur-xs border-2 border-[#D97706] rounded-full px-1.5 lg:px-2.5 py-0.5 flex items-center gap-1 lg:gap-1.5 shadow-lg select-none transition-transform hover:scale-105" id="hud-coins">
-          <span className="text-sm lg:text-base">💰</span>
+          <CoinIcon size={18} className="lg:hidden" />
+          <CoinIcon size={20} className="hidden lg:block" />
           <div className="flex flex-col text-left">
             <span className="text-[7.5px] font-black uppercase text-[#92400E] leading-none">Монеты</span>
             <span className="text-[11px] font-black text-[#B45309] leading-none mt-0.5 select-all">

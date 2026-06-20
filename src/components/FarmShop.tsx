@@ -8,6 +8,7 @@ import { AnimalSpecies, LocationId, FarmUpgrade } from "../types";
 import { ANIMAL_TEMPLATES, LOCATIONS, UPGRADES } from "../data";
 import { ShoppingBag, Star, Lock, PlusCircle, Coins, ArrowRight, ShieldCheck, Sparkles } from "lucide-react";
 import { playCoinSound, playClickSound, playAnimalSound } from "../lib/audio";
+import { GameIcon } from "./CoinIcon";
 
 interface FarmShopProps {
   coins: number;
@@ -316,8 +317,8 @@ export const FarmShop: React.FC<FarmShopProps> = ({
                   id={`upgrade-row-${id}`}
                 >
                   <div className="flex items-center gap-3">
-                    <span className="text-3xl bg-[#FEF3C7] p-2 rounded-xl border-2 border-[#D97706]/30">
-                      {upgrade.icon}
+                    <span className="text-3xl bg-[#FEF3C7] p-2 rounded-xl border-2 border-[#D97706]/30 inline-flex items-center justify-center">
+                      <GameIcon icon={upgrade.icon} size={28} />
                     </span>
                     <div>
                       <h4 className="font-black text-sm text-[#92400E] flex items-center gap-2">

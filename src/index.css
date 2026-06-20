@@ -36,10 +36,21 @@ body {
 }
 
 #root-viewport-game,
-#main-farm-container {
+#main-farm-container,
+#playground-viewport-wrapper {
   -webkit-user-select: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+#root-viewport-game {
+  height: 100dvh;
+  min-height: 100dvh;
+}
+
+#main-farm-container,
+#playground-viewport-wrapper {
+  min-height: 0;
 }
 
 @supports (padding: env(safe-area-inset-top)) {
