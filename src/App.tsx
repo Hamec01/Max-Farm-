@@ -8,7 +8,7 @@ import { PlayerState, AnimalSpecies, LocationId, CropType, TreeType, AnimalInsta
 import { INITIAL_STATE, ANIMAL_TEMPLATES, CROPS_CONFIG, TREES_CONFIG, LOCATIONS, UPGRADES, BUILDINGS_TEMPLATES, WORKER_DESCRIPTIONS, loadSavedGameState } from "./data";
 import { GameHeader } from "./components/GameHeader";
 import { CoinIcon, CoinPrice, FloatParticle, GameIcon } from "./components/CoinIcon";
-import { AnimalShopIcon, SkillIcon } from "./components/ShopIcons";
+import { AnimalShopIcon, SkillIcon, WorkerShopIcon } from "./components/ShopIcons";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { AnimalSVG } from "./components/AnimalSVG";
 import {
@@ -33,9 +33,26 @@ import {
   playFootstepSound,
   playWindAmbient,
   playNpcClickSound,
+  playDogBarkSound,
   updateBackgroundMusic,
 } from "./lib/soundManager";
 import { useGameViewport } from "./hooks/useGameViewport";
+import {
+  resolveEffectiveZoom,
+  resolveCameraShifts,
+  resolveDesktopZoom,
+  resolveDesktopShiftX,
+  buildStageTransform,
+  screenFractionToWorld,
+  isPointInCameraView,
+  shouldCullOffscreen,
+  walkLoopMs,
+  decorLoopMs,
+  maxDecorButterflies,
+  shouldSpawnWind,
+  saveDebounceMs,
+  isLiteEffects,
+} from "./lib/mobileCamera";
 import {
   separateAnimalsByLocation,
   wanderAnimalAvoidingOthers,
@@ -60,6 +77,10 @@ import {
   waterOneDryGardenPlot,
   harvestOneRipeGardenPlot,
   resolveAnimalFood,
+  feedOneHungryAnimalInZone,
+  getWorkerDutyZone,
+  POULTRY_SPECIES,
+  WATER_BIRD_SPECIES,
   GARDEN_PLOT_IDS,
 } from "./lib/farmAutomation";
 import { pickWorkerTravelZone, randomSpotInZone, ZONE_TRAVEL_LABEL } from "./lib/workerTravel";
@@ -113,6 +134,8 @@ const ALL_PLOT_IDS = GARDEN_PLOT_IDS;
 export default function App() {
   const { zoomScale, deviceKind } = useGameViewport();
   const isPhone = deviceKind === "phone";
+  const isCompact = deviceKind !== "desktop";
+  const liteEffects = isLiteEffects(deviceKind);
 
   // Load state from local storage or use initial state
   const [gameState, setGameState] = useState<PlayerState>(() => loadSavedGameState());
@@ -162,6 +185,7 @@ export default function App() {
     "worker-sonya": { x: 38, y: 74, targetX: 38, targetY: 74, isMoving: false, dir: "right", actionTimer: 0, currentZone: "GARDEN" },
     "worker-grisha": { x: 70, y: 50, targetX: 70, targetY: 50, isMoving: false, dir: "left", actionTimer: 0, currentZone: "GARDEN" },
     "worker-nina": { x: 40, y: 72, targetX: 40, targetY: 72, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MEADOW" },
+    "worker-petya": { x: 46, y: 74, targetX: 46, targetY: 74, isMoving: false, dir: "right", actionTimer: 0, currentZone: "BARNYARD" },
     "worker-olya": { x: 55, y: 74, targetX: 55, targetY: 74, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MEADOW" },
     "worker-vika": { x: 45, y: 76, targetX: 45, targetY: 76, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MEADOW" },
     "worker-igor": { x: 38, y: 72, targetX: 38, targetY: 72, isMoving: false, dir: "right", actionTimer: 0, currentZone: "DESERT" },
@@ -169,6 +193,8 @@ export default function App() {
     "worker-zoya": { x: 48, y: 78, targetX: 48, targetY: 78, isMoving: false, dir: "right", actionTimer: 0, currentZone: "LAKE" },
     "worker-roman": { x: 50, y: 68, targetX: 50, targetY: 68, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MAX_HOME" },
   });
+  const workersPositionsRef = useRef(workersPositions);
+  workersPositionsRef.current = workersPositions;
 
   const triggerWorkerActionFeedback = (_workerId: string, _x: number, _y: number, _label: string) => {
     // NPC работают тихо — визуальные эффекты только у действий игрока
@@ -188,6 +214,7 @@ export default function App() {
   gameStateRef.current = gameState;
   const workerZoneTickRef = useRef(0);
   const [customNotification, setCustomNotification] = useState<string | null>(null);
+  const [gameRoomImmersive, setGameRoomImmersive] = useState(false);
   const specialReturnZoneRef = useRef<LocationId>("MEADOW");
 
   const isInterior = isInteriorZone(activeZone);
@@ -195,9 +222,10 @@ export default function App() {
   const currentZoneIndex = WORLD_ZONES.indexOf(worldZone as (typeof WORLD_ZONES)[number]);
   const prevZone = WORLD_ZONES[(currentZoneIndex - 1 + WORLD_ZONES.length) % WORLD_ZONES.length];
   const nextZone = WORLD_ZONES[(currentZoneIndex + 1) % WORLD_ZONES.length];
-  const effectiveZoom =
-    activeZone === "MAX_HOME" ? zoomScale * 0.92
-    : zoomScale;
+  const isMobileCamera = deviceKind === "phone";
+  const effectiveZoom = isMobileCamera
+    ? resolveEffectiveZoom(zoomScale, deviceKind, activeZone)
+    : resolveDesktopZoom(zoomScale, activeZone);
 
   // Character walking state
   const [boyPosition, setBoyPosition] = useState({
@@ -216,11 +244,11 @@ export default function App() {
   const [fallingStars, setFallingStars] = useState<FallingStar[]>([]);
   const [pondFish, setPondFish] = useState<FishInstance[]>([]);
 
-  // Инициализируем несколько стартовых красивых бабочек (теперь меньше и разные)
+  // Инициализируем несколько стартовых красивых бабочек
   useEffect(() => {
     const initialButterflies: Butterfly[] = [
       { id: "b1", x: 30, y: 35, type: "green", emoji: "🦋", vx: 0.1, vy: -0.1 },
-      { id: "b2", x: 65, y: 45, type: "pink", emoji: "🦋", vx: -0.12, vy: 0.08 }
+      { id: "b2", x: 65, y: 45, type: "pink", emoji: "🦋", vx: -0.12, vy: 0.08 },
     ];
     setButterflies(initialButterflies);
   }, []);
@@ -243,11 +271,12 @@ export default function App() {
     );
   }, [activeZone, pondFish.length]);
 
-  // Высокочастотный таймер анимации бабочек и звезд (100мс)
+  // Высокочастотный таймер анимации бабочек и звезд
   useEffect(() => {
     const isNightVal = gameState.dayProgress !== undefined && gameState.dayProgress >= 192;
+    const decorMs = decorLoopMs(deviceKind);
+    const butterflyCap = maxDecorButterflies(deviceKind);
 
-    // Утром все звезды растворяются в лучах солнца
     if (!isNightVal) {
       setFallingStars([]);
     }
@@ -331,9 +360,9 @@ export default function App() {
 
       // 3. Динамический спавн (каждые 100мс с маленькой вероятностью)
       // А. Спавн бабочек (теперь максимум 3 на экране)
-      if (Math.random() < 0.005) {
+      if (deviceKind !== "phone" && Math.random() < 0.005) {
         setButterflies((prev) => {
-          if (prev.length >= 3) return prev;
+          if (prev.length >= butterflyCap) return prev;
           const colors: ("blue" | "orange" | "purple" | "gold" | "pink" | "green")[] = ["blue", "orange", "purple", "gold", "pink", "green"];
           const chosenColor = colors[Math.floor(Math.random() * colors.length)];
           
@@ -356,7 +385,7 @@ export default function App() {
       }
 
       // Б. Спавн падающих звезд ночью (максимум 4 лежащих на земле)
-      if (isNightVal && Math.random() < 0.015) {
+      if (deviceKind !== "phone" && isNightVal && Math.random() < (deviceKind === "tablet" ? 0.008 : 0.015)) {
         setFallingStars((prev) => {
           const activeGrounded = prev.filter((s) => s.isGrounded).length;
           if (activeGrounded >= 4) return prev;
@@ -372,10 +401,10 @@ export default function App() {
           return [...prev, newS];
         });
       }
-    }, 100);
+    }, decorMs);
 
     return () => clearInterval(timer);
-  }, [gameState.dayProgress, activeZone]);
+  }, [gameState.dayProgress, activeZone, deviceKind, isPhone]);
 
   // Сбор бабочки: за нее даются золотые монетки и опыт!
   const handleCollectButterfly = (id: string, e: React.MouseEvent) => {
@@ -498,10 +527,17 @@ export default function App() {
     };
   };
 
-  // Save changes to localStorage
   useEffect(() => {
-    localStorage.setItem("maxim_fermer_save", JSON.stringify(gameState));
-  }, [gameState]);
+    const delay = saveDebounceMs(deviceKind);
+    if (delay <= 0) {
+      localStorage.setItem("maxim_fermer_save", JSON.stringify(gameState));
+      return;
+    }
+    const timer = setTimeout(() => {
+      localStorage.setItem("maxim_fermer_save", JSON.stringify(gameState));
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [gameState, deviceKind]);
 
   // Real-time ticking engine for crops growth, satiety decay, animal production, day cycles and helper workers
   useEffect(() => {
@@ -714,6 +750,7 @@ export default function App() {
         const isSonyaHired = updatedWorkers.find(w => w.id === "worker-sonya")?.isActive;
         const isGrishaHired = updatedWorkers.find(w => w.id === "worker-grisha")?.isActive;
         const isNinaHired = updatedWorkers.find(w => w.id === "worker-nina")?.isActive;
+        const isPetyaHired = updatedWorkers.find(w => w.id === "worker-petya")?.isActive;
         const isOlyaHired = updatedWorkers.find(w => w.id === "worker-olya")?.isActive;
         const isVikaHired = updatedWorkers.find(w => w.id === "worker-vika")?.isActive;
         const isIgorHired = updatedWorkers.find(w => w.id === "worker-igor")?.isActive;
@@ -725,26 +762,31 @@ export default function App() {
         const compostLvl = prev.upgrades["richCompost"] || 0;
         const feederLvl = prev.upgrades["autoFeeder"] || 1;
         const autoFeederMultiplier = 1 + (feederLvl - 1) * 0.20;
+        const workerZones = workersPositionsRef.current;
 
-        // A. 👩‍🍳 Мама Женя — кормит всех голодных, у кого есть еда в рюкзаке
-        if (isFeedHired) {
-          updatedAnimals = updatedAnimals.map((animal) => {
-            if (animal.isFed) return animal;
-            const config = ANIMAL_TEMPLATES[animal.species];
-            const { hasFood, usedFoodKey } = resolveAnimalFood(updatedInventory, config.foodType);
-            if (!hasFood) return animal;
-
-            updatedInventory[usedFoodKey] = (updatedInventory[usedFoodKey] || 1) - 1;
+        const applyWorkerFeed = (
+          workerId: string,
+          fallbackZone: LocationId,
+          options?: Parameters<typeof feedOneHungryAnimalInZone>[3]
+        ) => {
+          const zone = getWorkerDutyZone(workerId, workerZones, fallbackZone);
+          const result = feedOneHungryAnimalInZone(
+            updatedAnimals,
+            updatedInventory,
+            zone,
+            { autoFeederMultiplier, ...options }
+          );
+          if (result.fed) {
+            updatedAnimals = result.animals;
+            updatedInventory = result.inventory;
             statsFedAdd += 1;
-            totalXpEarned += 8;
+            totalXpEarned += result.xp;
+          }
+        };
 
-            return {
-              ...animal,
-              isFed: true,
-              fedTimeRemaining: Math.round(config.productionTime * 2 * autoFeederMultiplier),
-              happiness: Math.min(animal.happiness + 20, 100),
-            };
-          });
+        // A. 👩‍🍳 Мама Женя — кормит 1 голодного зверя в своей зоне (ездит по локациям)
+        if (isFeedHired) {
+          applyWorkerFeed("worker-mama", "BARNYARD");
         }
 
         // B. 👵🏻 Бабушка Надя — полив, посадка, сбор на огороде
@@ -924,8 +966,9 @@ export default function App() {
           });
         }
 
-        // M. 🤠 Пастух Ваня — загоняет зверушек обратно в закрытый загон
+        // M. 🤠 Пастух Ваня — загоняет зверушек и подкармливает голодных в своей зоне
         if (isPastuhHired) {
+          applyWorkerFeed("worker-pastuh", "MEADOW", { happinessBoost: 12, xpReward: 6 });
           const pensList = prev.pens || [];
           updatedAnimals = updatedAnimals.map((animal) => {
             if (!animal.penId) return animal;
@@ -967,14 +1010,19 @@ export default function App() {
           waterOneDryGardenPlot(updatedCrops);
         }
 
-        // O. 👩‍🌾 Тётя Нина — собирает яйца у кур в загоне
+        // O. 👩‍🌾 Тётя Нина — кормит птиц и собирает яйца в своей зоне
         if (isNinaHired) {
+          applyWorkerFeed("worker-nina", "MEADOW", {
+            speciesFilter: POULTRY_SPECIES,
+            happinessBoost: 15,
+            xpReward: 7,
+          });
           let ninaCheck = false;
           updatedAnimals = updatedAnimals.map((animal) => {
             if (
               !ninaCheck &&
               animal.productionProgress >= 100 &&
-              [AnimalSpecies.CHICKEN, AnimalSpecies.DUCK, AnimalSpecies.GOOSE].includes(animal.species)
+              POULTRY_SPECIES.includes(animal.species)
             ) {
               const config = ANIMAL_TEMPLATES[animal.species];
               updatedInventory[config.productName] = (updatedInventory[config.productName] || 0) + 1;
@@ -988,28 +1036,21 @@ export default function App() {
           });
         }
 
-        // P. 🐰 Оля — кормит кроликов
-        if (isOlyaHired) {
-          let olyaFed = false;
-          updatedAnimals = updatedAnimals.map((animal) => {
-            if (!olyaFed && animal.species === AnimalSpecies.RABBIT && !animal.isFed) {
-              const config = ANIMAL_TEMPLATES[animal.species];
-              const foodType = config.foodType;
-              if ((updatedInventory[foodType] || 0) > 0) {
-                updatedInventory[foodType] = (updatedInventory[foodType] || 1) - 1;
-                olyaFed = true;
-                statsFedAdd += 1;
-                totalXpEarned += 7;
+        // O2. 👦 Петя — второй птичник, кормит птиц в своей зоне
+        if (isPetyaHired) {
+          applyWorkerFeed("worker-petya", "BARNYARD", {
+            speciesFilter: POULTRY_SPECIES,
+            happinessBoost: 12,
+            xpReward: 6,
+          });
+        }
 
-                return {
-                  ...animal,
-                  isFed: true,
-                  fedTimeRemaining: Math.round(config.productionTime * 2),
-                  happiness: Math.min(animal.happiness + 15, 100),
-                };
-              }
-            }
-            return animal;
+        // P. 🐰 Оля — кормит кроликов в своей зоне
+        if (isOlyaHired) {
+          applyWorkerFeed("worker-olya", "MEADOW", {
+            speciesFilter: [AnimalSpecies.RABBIT],
+            happinessBoost: 15,
+            xpReward: 7,
           });
           let olyaCollect = false;
           updatedAnimals = updatedAnimals.map((animal) => {
@@ -1026,8 +1067,13 @@ export default function App() {
           });
         }
 
-        // Q. 🐷 Вика — собирает у свинок и чистит
+        // Q. 🐷 Вика — кормит свинок, собирает и чистит в своей зоне
         if (isVikaHired) {
+          applyWorkerFeed("worker-vika", "MEADOW", {
+            speciesFilter: [AnimalSpecies.PIG],
+            happinessBoost: 14,
+            xpReward: 7,
+          });
           let vikaCollect = false;
           updatedAnimals = updatedAnimals.map((animal) => {
             if (!vikaCollect && animal.species === AnimalSpecies.PIG && animal.productionProgress >= 100) {
@@ -1088,8 +1134,13 @@ export default function App() {
           });
         }
 
-        // T. 🦢 Зоя — собирает у лебедей и водоплавающих
+        // T. 🦢 Зоя — кормит водоплавающих и собирает перья в своей зоне
         if (isZoyaHired) {
+          applyWorkerFeed("worker-zoya", "LAKE", {
+            speciesFilter: WATER_BIRD_SPECIES,
+            happinessBoost: 15,
+            xpReward: 7,
+          });
           let zoyaCheck = false;
           updatedAnimals = updatedAnimals.map((animal) => {
             if (
@@ -1173,7 +1224,7 @@ export default function App() {
   useEffect(() => {
     if (isMuted) return;
     const ambientTimer = setInterval(() => {
-      if (Math.random() < 0.022) {
+      if (Math.random() < (deviceKind === "phone" ? 0.01 : 0.022)) {
         const zoneAnimals = gameState.animals.filter(
           (a) => (a.locationId || "MEADOW") === activeZone
         );
@@ -1185,15 +1236,21 @@ export default function App() {
       const dp = gameState.dayProgress ?? 0;
       const isNightVal = dp >= 192;
       const now = Date.now();
-      if (!isNightVal && now - lastWindRef.current > 42000 && Math.random() < 0.35) {
+      if (!isNightVal && shouldSpawnWind(deviceKind) && now - lastWindRef.current > 42000 && Math.random() < 0.35) {
         lastWindRef.current = now;
         playWindAmbient();
       }
     }, 2500);
     return () => clearInterval(ambientTimer);
-  }, [gameState.animals, gameState.dayProgress, activeZone, isMuted]);
+  }, [gameState.animals, gameState.dayProgress, activeZone, isMuted, deviceKind]);
 
-  const shiftPercent = Math.max(0, Math.min((effectiveZoom - 1) * 100, (boyPosition.x * effectiveZoom) - 50));
+  const { shiftX, shiftY } = isMobileCamera
+    ? resolveCameraShifts(boyPosition.x, boyPosition.y, effectiveZoom, deviceKind, activeZone)
+    : { shiftX: resolveDesktopShiftX(boyPosition.x, effectiveZoom), shiftY: 0 };
+  const cullOffscreen = shouldCullOffscreen(deviceKind, activeZone);
+
+  const isEntityVisible = (x: number, y: number, margin = 10) =>
+    !cullOffscreen || isPointInCameraView(x, y, shiftX, shiftY, effectiveZoom, margin);
 
   // Tossing & Dragging tracking
   const draggedDistanceRef = useRef(0);
@@ -1219,6 +1276,7 @@ export default function App() {
 
   // Smooth walk & animal physics loop
   useEffect(() => {
+    const walkMs = walkLoopMs(deviceKind);
     const walkTimer = setInterval(() => {
       // 1. Move player boy
       setBoyPosition((prev) => {
@@ -1493,7 +1551,7 @@ export default function App() {
               } else if (wid === "worker-dima") {
                 targetX = LAKESIDE_POND.dockX - 6 + Math.random() * 12;
                 targetY = LAKESIDE_POND.dockY - 3 + Math.random() * 5;
-              } else if (wid === "worker-pastuh" || wid === "worker-nina" || wid === "worker-olya") {
+              } else if (wid === "worker-pastuh" || wid === "worker-nina" || wid === "worker-petya" || wid === "worker-olya") {
                 targetX = 15 + Math.random() * 55;
                 targetY = 64 + Math.random() * 16;
               } else if (
@@ -1547,10 +1605,10 @@ export default function App() {
 
         return updated ? next : prev;
       });
-    }, 30);
+    }, walkMs);
 
     return () => clearInterval(walkTimer);
-  }, [draggedAnimalId, draggedWorkerId]);
+  }, [draggedAnimalId, draggedWorkerId, deviceKind]);
 
   // Keyboard controls
   useEffect(() => {
@@ -1601,6 +1659,10 @@ export default function App() {
   const triggerAnimalDragConfirmed = (animalId: string, species: AnimalSpecies) => {
     if (isAnimalDraggingConfirmedRef.current) return;
     isAnimalDraggingConfirmedRef.current = true;
+    if (species === AnimalSpecies.DOG) {
+      unlockAudio();
+      playDogBarkSound();
+    }
     setDraggedAnimalId(animalId);
     setSelectedAnimalId(null); // Hide details menu completely when entering physics throwing mode!
     setSelectedPlotId(null);
@@ -1692,11 +1754,18 @@ export default function App() {
     const rect = container.getBoundingClientRect();
     const fractionX = (clientX - rect.left) / rect.width;
     const fractionY = (clientY - rect.top) / rect.height;
-    const internalX = (fractionX * 100 + shiftPercent) / zoomScale;
-    const internalY = 100 - ((1 - fractionY) * 100) / zoomScale;
+    const world = screenFractionToWorld(
+      fractionX,
+      fractionY,
+      shiftX,
+      shiftY,
+      effectiveZoom,
+      deviceKind,
+      zoomScale
+    );
     return {
-      x: Math.max(5, Math.min(95, internalX)),
-      y: Math.max(30, Math.min(84, internalY)),
+      x: Math.max(5, Math.min(95, world.x)),
+      y: Math.max(30, Math.min(84, world.y)),
     };
   };
 
@@ -2813,8 +2882,18 @@ export default function App() {
     const fractionX = (e.clientX - rect.left) / rect.width;
     const fractionY = (e.clientY - rect.top) / rect.height;
 
-    const clickX = (fractionX * 100 + shiftPercent) / zoomScale;
-    const clickY = 100 - ((1 - fractionY) * 100) / zoomScale;
+    const world = screenFractionToWorld(
+      fractionX,
+      fractionY,
+      shiftX,
+      shiftY,
+      effectiveZoom,
+      deviceKind,
+      zoomScale
+    );
+
+    const clickX = world.x;
+    const clickY = world.y;
 
     const constrainedX = Math.max(5, Math.min(95, clickX));
     const constrainedY = Math.max(54, Math.min(86, clickY));
@@ -2850,7 +2929,7 @@ export default function App() {
       const sp = animal.species;
       if ([AnimalSpecies.CAT, AnimalSpecies.DOG].includes(sp)) return true;
       if (zone === "MEADOW") {
-        return [AnimalSpecies.CHICKEN, AnimalSpecies.DUCK, AnimalSpecies.PEACOCK, AnimalSpecies.RABBIT].includes(sp);
+        return [AnimalSpecies.CHICK, AnimalSpecies.CHICKEN, AnimalSpecies.DUCK, AnimalSpecies.PEACOCK, AnimalSpecies.RABBIT].includes(sp);
       }
       if (zone === "BARNYARD") {
         return [AnimalSpecies.COW, AnimalSpecies.BULL, AnimalSpecies.PIG, AnimalSpecies.HORSE, AnimalSpecies.DONKEY, AnimalSpecies.GOAT, AnimalSpecies.SHEEP, AnimalSpecies.DOG].includes(sp);
@@ -2859,7 +2938,7 @@ export default function App() {
         return [AnimalSpecies.DUCK, AnimalSpecies.GOOSE, AnimalSpecies.SWAN, AnimalSpecies.GOAT, AnimalSpecies.SHEEP, AnimalSpecies.COW, AnimalSpecies.CAT].includes(sp);
       }
       if (zone === "ORCHARD") {
-        return [AnimalSpecies.HORSE, AnimalSpecies.DONKEY, AnimalSpecies.RABBIT, AnimalSpecies.CAT, AnimalSpecies.DOG, AnimalSpecies.SHEEP, AnimalSpecies.CHICKEN, AnimalSpecies.TURKEY].includes(sp);
+        return [AnimalSpecies.HORSE, AnimalSpecies.DONKEY, AnimalSpecies.RABBIT, AnimalSpecies.CAT, AnimalSpecies.DOG, AnimalSpecies.SHEEP, AnimalSpecies.CHICK, AnimalSpecies.CHICKEN, AnimalSpecies.TURKEY].includes(sp);
       }
       if (zone === "DESERT") {
         return [AnimalSpecies.T_REX, AnimalSpecies.TRICERATOPS, AnimalSpecies.PTERODACTYL, AnimalSpecies.DIPLODOCUS, AnimalSpecies.DONKEY, AnimalSpecies.GOAT, AnimalSpecies.FENNEC, AnimalSpecies.CAMEL].includes(sp);
@@ -2874,7 +2953,7 @@ export default function App() {
         return [AnimalSpecies.HORSE, AnimalSpecies.DONKEY, AnimalSpecies.SHEEP, AnimalSpecies.GOAT, AnimalSpecies.PEACOCK, AnimalSpecies.DOG].includes(sp);
       }
       if (zone === "VALLEY") {
-        return [AnimalSpecies.COW, AnimalSpecies.BULL, AnimalSpecies.PIG, AnimalSpecies.RABBIT, AnimalSpecies.CHICKEN, AnimalSpecies.DUCK, AnimalSpecies.GOAT].includes(sp);
+        return [AnimalSpecies.COW, AnimalSpecies.BULL, AnimalSpecies.PIG, AnimalSpecies.RABBIT, AnimalSpecies.CHICK, AnimalSpecies.CHICKEN, AnimalSpecies.DUCK, AnimalSpecies.GOAT].includes(sp);
       }
       return true;
     });
@@ -3130,7 +3209,11 @@ export default function App() {
       <main className="w-full max-w-none mt-0 flex flex-col gap-0 animate-fade-in flex-1 min-h-0" id="main-farm-container">
         
         {/* WALKING WORLD VIEWPORT CANVAS - FULL BLEED RESIZING FOR ALL SCREENS */}
-        <div className="relative w-full shadow-lg flex-1 min-h-0 h-full" id="playground-viewport-wrapper">
+        <div
+          className={`relative w-full shadow-lg flex-1 min-h-0 h-full ${gameRoomImmersive ? "invisible pointer-events-none" : ""}`}
+          id="playground-viewport-wrapper"
+          aria-hidden={gameRoomImmersive}
+        >
           <div
             onPointerDown={(e) => {
               if (e.pointerType === "touch" && !(e.target as HTMLElement).closest(".interactive-element")) {
@@ -3152,6 +3235,8 @@ export default function App() {
                 transition: "height 280ms ease-out",
               }}
             className={`w-full h-full min-h-0 rounded-none relative overflow-hidden transition-[background-color,box-shadow] duration-[1000ms] select-none touch-none ${
+              liteEffects ? "mobile-lite" : ""
+            } ${
               isNight
                 ? "bg-gradient-to-b from-[#0F172A] via-[#1E1B4B] to-[#2E1065]"
                 : "bg-gradient-to-b from-sky-400 to-sky-300"
@@ -3179,11 +3264,12 @@ export default function App() {
               id="scrolling-stage"
               className="absolute inset-0 select-none"
               style={{
-                transform: `scale(${effectiveZoom}) translateX(${-shiftPercent / effectiveZoom}%)`,
+                transform: buildStageTransform(effectiveZoom, shiftX, shiftY, deviceKind),
                 transformOrigin: "left bottom",
                 width: "100%",
                 height: "100%",
-                transition: "transform 220ms cubic-bezier(0.25, 0.8, 0.25, 1)"
+                transition: "transform 220ms cubic-bezier(0.25, 0.8, 0.25, 1)",
+                willChange: isCompact ? "transform" : undefined,
               }}
             >
               {/* 1. SKY CELESTIAL BODIES & LARGE LAYERED DRIFTING CLOUDS */}
@@ -3226,6 +3312,7 @@ export default function App() {
                   setShowMaxHomeShop(true);
                   triggerNotification("🛋️ Роман-домовой: выбирай мебель для комнаты!");
                 }}
+                onImmersiveChange={setGameRoomImmersive}
               />
             )}
 
@@ -3975,6 +4062,14 @@ export default function App() {
               const template = ANIMAL_TEMPLATES[animal.species];
               const isDragged = draggedAnimalId === animal.id;
 
+              if (
+                !isEntityVisible(animal.x, animal.y) &&
+                !isDragged &&
+                !isSelected
+              ) {
+                return null;
+              }
+
               return (
                 <button
                   key={animal.id}
@@ -4028,7 +4123,7 @@ export default function App() {
             })}
 
             {/* 🦋 3D-EFFECT COLLECTIBLE BUTTERFLIES (Flit dynamically around pasture) */}
-            {butterflies.map((b) => (
+            {butterflies.filter((b) => isEntityVisible(b.x, b.y, 6)).map((b) => (
               <button
                 key={b.id}
                 onClick={(e) => handleCollectButterfly(b.id, e)}
@@ -4055,7 +4150,7 @@ export default function App() {
             ))}
 
             {/* 🌠 CELESTIAL COLLECTIBLE FALLING STARS (Descending / Grounded at night) */}
-            {fallingStars.map((s) => (
+            {fallingStars.filter((s) => isEntityVisible(s.x, s.y, 6)).map((s) => (
               <button
                 key={s.id}
                 onClick={(e) => handleCollectStar(s.id, e)}
@@ -4094,9 +4189,9 @@ export default function App() {
               </button>
             ))}
 
-            {/* F. THE BOY EXPLORER CHARACTER (👦🏼) - High-fidelity Vector Model! */}
+            {/* F. MAXIM — custom sprite (public/assets/characters/maxim/idle.png) */}
             <div
-              className="absolute w-16 h-18 z-20 pointer-events-none select-none transition-all duration-[40ms]"
+              className="absolute w-16 h-20 z-20 pointer-events-none select-none transition-all duration-[40ms]"
               style={{
                 left: `${boyPosition.x}%`,
                 top: `${boyPosition.y}%`,
@@ -4104,50 +4199,12 @@ export default function App() {
               }}
             >
               <div className={`relative flex flex-col items-center ${boyPosition.isMoving ? "animate-walk-wobble" : ""}`}>
-                <svg viewBox="0 0 60 70" className="w-16 h-18 filter drop-shadow-md">
-                  {/* Straw strawhat */}
-                  <ellipse cx="30" cy="18" rx="14" ry="10" fill="#EAB308" stroke="#713F12" strokeWidth="2" />
-                  <rect x="20" y="16" width="20" height="3" fill="#B45309" />
-                  <ellipse cx="30" cy="21" rx="22" ry="5" fill="#FACC15" stroke="#713F12" strokeWidth="2" />
-
-                  {/* Curly golden locks of toddler Maxim */}
-                  <circle cx="16" cy="27" r="4.5" fill="#78350F" />
-                  <circle cx="44" cy="27" r="4.5" fill="#78350F" />
-                  <path d="M 18 24 Q 30 19 42 24" fill="#78350F" />
-
-                  {/* Cheerful head and chubby cheeks */}
-                  <circle cx="30" cy="30" r="11" fill="#FFD1A9" stroke="#713F12" strokeWidth="1.5" />
-                  <circle cx="22" cy="32" r="2.5" fill="#EF4444" opacity="0.6" />
-                  <circle cx="38" cy="32" r="2.5" fill="#EF4444" opacity="0.6" />
-                  <circle cx="25" cy="28" r="1.8" fill="#1F2937" />
-                  <circle cx="35" cy="28" r="1.8" fill="#1F2937" />
-                  <circle cx="26" cy="27" r="0.6" fill="#FFFFFF" />
-                  <circle cx="36" cy="27" r="0.6" fill="#FFFFFF" />
-                  <path d="M 26 33 Q 30 38 34 33" stroke="#713F12" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-
-                  {/* Arms */}
-                  <line x1="18" y1="44" x2="14" y2="52" stroke="#FFF7ED" strokeWidth="6" strokeLinecap="round" />
-                  <line x1="42" y1="44" x2="46" y2="52" stroke="#FFF7ED" strokeWidth="6" strokeLinecap="round" />
-                  {/* Little helper hands */}
-                  <circle cx="12" cy="53" r="3.5" fill="#B45309" stroke="#713F12" strokeWidth="1" />
-                  <circle cx="48" cy="53" r="3.5" fill="#B45309" stroke="#713F12" strokeWidth="1" />
-
-                  {/* Cute blue farmer overalls */}
-                  <rect x="20" y="39" width="20" height="18" rx="4" fill="#3B82F6" stroke="#1D4ED8" strokeWidth="1.5" />
-                  <line x1="23" y1="38" x2="23" y2="44" stroke="#1D4ED8" strokeWidth="3" strokeLinecap="round" />
-                  <line x1="37" y1="38" x2="37" y2="44" stroke="#1D4ED8" strokeWidth="3" strokeLinecap="round" />
-                  <circle cx="23" cy="44" r="1.5" fill="#FBBF24" />
-                  <circle cx="37" cy="44" r="1.5" fill="#FBBF24" />
-                  <rect x="24" y="47" width="12" height="6" rx="1.5" fill="none" stroke="#1D4ED8" strokeWidth="1" />
-
-                  {/* Overalls trousers leg cuffs */}
-                  <rect x="21" y="55" width="8" height="7" fill="#3B82F6" stroke="#1D4ED8" strokeWidth="1.5" />
-                  <rect x="31" y="55" width="8" height="7" fill="#3B82F6" stroke="#1D4ED8" strokeWidth="1.5" />
-
-                  {/* Cute leather brown boots */}
-                  <ellipse cx="23" cy="63" rx="5" ry="3.5" fill="#713F12" stroke="#451A03" strokeWidth="1.5" />
-                  <ellipse cx="37" cy="63" rx="5" ry="3.5" fill="#713F12" stroke="#451A03" strokeWidth="1.5" />
-                </svg>
+                <img
+                  src="/assets/characters/maxim/idle.png"
+                  alt="Максим"
+                  className="w-16 h-20 object-contain object-bottom filter drop-shadow-md"
+                  draggable={false}
+                />
 
                 {/* Feet shadow */}
                 <div className="absolute bottom-[-2px] bg-black/15 w-8 h-2 rounded-full filter blur-[1px]" />
@@ -4173,6 +4230,7 @@ export default function App() {
                 : worker.id === "worker-dima" ? "🎣"
                 : worker.id === "worker-pastuh" ? "🤠"
                 : worker.id === "worker-nina" ? "🥚"
+                : worker.id === "worker-petya" ? "🐥"
                 : worker.id === "worker-sveta" ? "🍞"
                 : worker.id === "worker-misha" ? "✂️"
                 : worker.id === "worker-masha" ? "⭐"
@@ -4190,6 +4248,8 @@ export default function App() {
 
               const isDragged = draggedWorkerId === worker.id;
               const tossAngle = pos?.angle ?? 0;
+
+              if (!isEntityVisible(posX, posY) && !isDragged) return null;
 
               return (
                 <button
@@ -4211,7 +4271,11 @@ export default function App() {
                     {/* Bubbled tooltip detailing what they are doing! */}
                     <div className="absolute -top-7 px-1.5 py-0.5 bg-slate-900 border border-slate-600 text-slate-50 rounded-full text-[8px] font-black shadow-md flex items-center gap-1 whitespace-nowrap uppercase tracking-wider" style={{ transform: `scaleX(${dir === "left" ? -1 : 1})` }}>
                       <span>{worker.emoji}</span>
-                      <span>{worker.name.split(" ")[1] || worker.name}</span>
+                      <span className={worker.id === "worker-fyodor" ? "normal-case" : ""}>
+                        {worker.id === "worker-fyodor"
+                          ? "деда Дима"
+                          : worker.name.split(" ")[1] || worker.name}
+                      </span>
                       <span className="text-[10px] animate-bounce">{actionIcon}</span>
                     </div>
 
@@ -5027,9 +5091,9 @@ export default function App() {
                   return (
                     <div key={worker.id} className={`bg-white p-2 lg:p-3 rounded-xl lg:rounded-2xl border-2 flex flex-col sm:flex-row items-center justify-between shadow-xs ${worker.isActive ? "border-green-400 bg-green-50/10" : "border-[#6B3F23]/15"}`}>
                       <div className="flex items-center gap-2 lg:gap-3 w-full sm:w-auto">
-                        <span className={`text-3xl lg:text-4xl p-1.5 lg:p-2.5 rounded-xl lg:rounded-2xl ${worker.color}`}>
-                          {worker.emoji}
-                        </span>
+                        <div className={`p-0.5 rounded-xl lg:rounded-2xl bg-gradient-to-br shadow-sm shrink-0 ${worker.color}`}>
+                          <WorkerShopIcon workerId={worker.id} />
+                        </div>
                         <div className="text-left">
                           <h4 className="font-extrabold text-xs text-slate-900 flex items-center gap-1.5 flex-wrap">
                             <span>{worker.name}</span>
@@ -5165,7 +5229,7 @@ export default function App() {
         </div>
       )}
 
-      {showLocationMap && (
+      {showLocationMap && !gameRoomImmersive && (
         <LocationMapModal
           activeLocationId={activeZone}
           unlockedLocationIds={gameState.unlockedLocations}
@@ -5176,7 +5240,7 @@ export default function App() {
         />
       )}
 
-      {showMaxHomeShop && activeZone === "MAX_HOME" && (
+      {showMaxHomeShop && activeZone === "MAX_HOME" && !gameRoomImmersive && (
         <MaxHomeShop
           coins={gameState.coins}
           level={gameState.level}
@@ -5187,12 +5251,12 @@ export default function App() {
       )}
 
       {/* Help Instructions popup Overlay */}
-      {showHelp && (
+      {showHelp && !gameRoomImmersive && (
         <HelpOverlay onClose={() => setShowHelp(false)} />
       )}
 
       {/* Floating brief action banner feedback */}
-      {customNotification && (
+      {customNotification && !gameRoomImmersive && (
         <div className="fixed bottom-4 lg:bottom-6 left-1/2 transform -translate-x-1/2 bg-[#FFFBEB] text-[#92400E] text-[10px] lg:text-sm font-black p-2 px-4 lg:p-3.5 lg:px-6 rounded-2xl lg:rounded-3xl shadow-2xl border-2 lg:border-4 border-[#92400E] z-50 animate-bounce-slow flex items-center gap-1.5 lg:gap-2 max-w-[92vw]" id="live-notification">
           <span className="text-base lg:text-xl animate-spin-slow">🌟</span>
           <span>{customNotification}</span>

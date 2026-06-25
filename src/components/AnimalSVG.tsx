@@ -7,11 +7,18 @@ import React from "react";
 import { AnimalSpecies } from "../types";
 
 // НАСТРОЙКА СПРАЙТОВ ИЗ ФАЙЛОВ:
-// true — загружать файлы из `/public/assets/animals/` (SVG или PNG).
+// true — для видов из CUSTOM_SPRITE_SPECIES загружать PNG из `/public/assets/animals/`.
 // Сначала ищется .svg, затем .png; если ничего нет — встроенный SVG в коде.
-export const USE_CUSTOM_SPRITES = false;
+export const USE_CUSTOM_SPRITES = true;
 /** @deprecated имя сохранено для совместимости — используйте USE_CUSTOM_SPRITES */
 export const USE_PNG_SPRITES = USE_CUSTOM_SPRITES;
+
+const CUSTOM_SPRITE_SPECIES = new Set<AnimalSpecies>([
+  AnimalSpecies.CHICK,
+  AnimalSpecies.CHICKEN,
+  AnimalSpecies.GOOSE,
+  AnimalSpecies.TURKEY,
+]);
 
 function getSpriteBaseName(isSheared: boolean, isSad: boolean, isDirty: boolean): string {
   if (isSheared) return "bald";
@@ -21,10 +28,11 @@ function getSpriteBaseName(isSheared: boolean, isSad: boolean, isDirty: boolean)
 }
 
 function getSpriteCandidates(folderName: string, baseName: string): string[] {
-  return [
-    `/assets/animals/${folderName}/${baseName}.svg`,
-    `/assets/animals/${folderName}/${baseName}.png`,
-  ];
+  const names = baseName === "dirty" ? ["dirty", "hungry"] : [baseName];
+  return names.flatMap((name) => [
+    `/assets/animals/${folderName}/${name}.svg`,
+    `/assets/animals/${folderName}/${name}.png`,
+  ]);
 }
 
 export interface AnimalSVGProps {
@@ -62,7 +70,7 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
   }, [species, spriteBaseName]);
 
   // Файловый спрайт: SVG → PNG → встроенный SVG
-  if (USE_CUSTOM_SPRITES && !fileSpritesFailed) {
+  if (USE_CUSTOM_SPRITES && CUSTOM_SPRITE_SPECIES.has(species) && !fileSpritesFailed) {
     const spriteSrc = spriteCandidates[candidateIndex];
 
     return (
@@ -130,6 +138,38 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
   };
 
   switch (species) {
+    case AnimalSpecies.CHICK:
+      return (
+        <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-chick">
+          <ellipse cx="50" cy="85" rx="18" ry="5" fill="#1E3A1E" opacity="0.25" />
+          <path d="M 42 72 L 38 80 M 42 72 L 42 81 M 42 72 L 46 79" stroke="#F59E0B" strokeWidth="3" strokeLinecap="round" />
+          <path d="M 58 72 L 54 80 M 58 72 L 58 81 M 58 72 L 62 79" stroke="#F59E0B" strokeWidth="3" strokeLinecap="round" />
+          <circle cx="50" cy="58" r="22" fill="#FDE047" stroke="#EAB308" strokeWidth="2" />
+          <circle cx="50" cy="38" r="16" fill="#FDE047" stroke="#EAB308" strokeWidth="2" />
+          <path d="M 42 24 Q 50 16 58 24" fill="#EF4444" />
+          <circle cx="46" cy="20" r="4" fill="#EF4444" />
+          <circle cx="54" cy="20" r="4" fill="#EF4444" />
+          {isSad ? (
+            <g>
+              <path d="M 44 36 L 48 38" stroke="#1E293B" strokeWidth="2.5" strokeLinecap="round" />
+              <path d="M 56 36 L 52 38" stroke="#1E293B" strokeWidth="2.5" strokeLinecap="round" />
+              <path d="M 46 44 Q 50 42 54 44" stroke="#4A3423" strokeWidth="2" fill="none" />
+            </g>
+          ) : (
+            <g>
+              <circle cx="44" cy="36" r="3" fill="#1E293B" />
+              <circle cx="56" cy="36" r="3" fill="#1E293B" />
+              <circle cx="45" cy="35" r="1" fill="#FFFFFF" />
+              <circle cx="57" cy="35" r="1" fill="#FFFFFF" />
+              <path d="M 46 44 Q 50 48 54 44" stroke="#4A3423" strokeWidth="2" fill="none" />
+            </g>
+          )}
+          <polygon points="47,40 53,40 50,47" fill="#F59E0B" />
+          <path d="M 32 52 Q 24 48 28 42" stroke="#FBBF24" strokeWidth="5" fill="none" strokeLinecap="round" />
+          <path d="M 68 52 Q 76 48 72 42" stroke="#FBBF24" strokeWidth="5" fill="none" strokeLinecap="round" />
+        </svg>
+      );
+
     case AnimalSpecies.CHICKEN:
       return (
         <svg viewBox="0 0 100 100" className={`w-full h-full ${className}`} id="svg-chicken">

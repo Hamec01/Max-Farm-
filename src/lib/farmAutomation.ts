@@ -1,7 +1,26 @@
 import { ANIMAL_TEMPLATES, CROPS_CONFIG } from "../data";
-import { AnimalInstance, CropInstance, CropType } from "../types";
+import { AnimalInstance, AnimalSpecies, CropInstance, CropType, LocationId } from "../types";
 
 const ALL_CROP_TYPES = Object.keys(CROPS_CONFIG) as CropType[];
+
+export const POULTRY_SPECIES: AnimalSpecies[] = [
+  AnimalSpecies.CHICK,
+  AnimalSpecies.CHICKEN,
+  AnimalSpecies.DUCK,
+  AnimalSpecies.GOOSE,
+  AnimalSpecies.TURKEY,
+  AnimalSpecies.PEACOCK,
+];
+
+export const WATER_BIRD_SPECIES: AnimalSpecies[] = [
+  AnimalSpecies.DUCK,
+  AnimalSpecies.GOOSE,
+  AnimalSpecies.SWAN,
+];
+
+export function getAnimalHomeZone(animal: AnimalInstance): LocationId {
+  return (animal.locationId || "MEADOW") as LocationId;
+}
 
 export const GARDEN_PLOT_IDS = [
   "plot1", "plot2", "plot3", "plot4", "plot5", "plot6", "plot7", "plot8",
@@ -89,6 +108,68 @@ export function resolveAnimalFood(
     return { hasFood: true, usedFoodKey: foodType };
   }
   return { hasFood: false, usedFoodKey: foodType };
+}
+
+export interface FeedOneResult {
+  animals: AnimalInstance[];
+  inventory: Record<string, number>;
+  fed: boolean;
+  xp: number;
+}
+
+/** Кормит одно голодное животное в указанной зоне (не больше 1 за вызов) */
+export function feedOneHungryAnimalInZone(
+  animals: AnimalInstance[],
+  inventory: Record<string, number>,
+  zone: LocationId,
+  options?: {
+    speciesFilter?: AnimalSpecies[];
+    autoFeederMultiplier?: number;
+    happinessBoost?: number;
+    xpReward?: number;
+  }
+): FeedOneResult {
+  const {
+    speciesFilter,
+    autoFeederMultiplier = 1,
+    happinessBoost = 20,
+    xpReward = 8,
+  } = options ?? {};
+
+  const nextInventory = { ...inventory };
+  let fed = false;
+  let xp = 0;
+
+  const updated = animals.map((animal) => {
+    if (fed || animal.isFed) return animal;
+    if (getAnimalHomeZone(animal) !== zone) return animal;
+    if (speciesFilter && !speciesFilter.includes(animal.species)) return animal;
+
+    const config = ANIMAL_TEMPLATES[animal.species];
+    const { hasFood, usedFoodKey } = resolveAnimalFood(nextInventory, config.foodType);
+    if (!hasFood) return animal;
+
+    nextInventory[usedFoodKey] = (nextInventory[usedFoodKey] || 1) - 1;
+    fed = true;
+    xp = xpReward;
+
+    return {
+      ...animal,
+      isFed: true,
+      fedTimeRemaining: Math.round(config.productionTime * 2 * autoFeederMultiplier),
+      happiness: Math.min(animal.happiness + happinessBoost, 100),
+    };
+  });
+
+  return { animals: updated, inventory: nextInventory, fed, xp };
+}
+
+export function getWorkerDutyZone(
+  workerId: string,
+  workerZones: Record<string, { currentZone?: LocationId } | undefined>,
+  fallback: LocationId
+): LocationId {
+  return workerZones[workerId]?.currentZone ?? fallback;
 }
 
 /** Посадить одну пустую грядку; возвращает true если посадили */

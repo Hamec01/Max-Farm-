@@ -1,6 +1,7 @@
 import React from "react";
 import { AnimalSpecies } from "../types";
 import { AnimalSVG } from "./AnimalSVG";
+import { WorkerSVG } from "./WorkerSVG";
 
 /** Мини-спрайт животного для карточек магазина */
 export const AnimalShopIcon: React.FC<{ species: AnimalSpecies; className?: string }> = ({
@@ -12,6 +13,23 @@ export const AnimalShopIcon: React.FC<{ species: AnimalSpecies; className?: stri
     aria-hidden
   >
     <AnimalSVG species={species} happiness={85} isFed={true} cleanliness={90} />
+  </div>
+);
+
+/** Портрет работника из игрового спрайта для карточек найма */
+export const WorkerShopIcon: React.FC<{ workerId: string; className?: string }> = ({
+  workerId,
+  className = "",
+}) => (
+  <div
+    className={`w-11 h-11 lg:w-14 lg:h-14 shrink-0 rounded-xl lg:rounded-2xl overflow-hidden bg-white/85 flex items-start justify-center ${className}`}
+    aria-hidden
+  >
+    <WorkerSVG
+      workerId={workerId}
+      variant="portrait"
+      className="filter drop-shadow-sm translate-y-0.5"
+    />
   </div>
 );
 

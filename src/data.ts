@@ -7,6 +7,20 @@ import { AnimalConfig, AnimalSpecies, CropConfig, CropType, TreeConfig, TreeType
 import { createInitialPenStates } from "./lib/penLogic";
 
 export const ANIMAL_TEMPLATES: Record<AnimalSpecies, AnimalConfig> = {
+  [AnimalSpecies.CHICK]: {
+    species: AnimalSpecies.CHICK,
+    nameRu: "Цыплёнок Пи",
+    emoji: "🐥",
+    cost: 30,
+    foodType: "WHEAT",
+    foodNameRu: "Пшеница",
+    productionTime: 15,
+    productName: "Крошечное яйцо",
+    productPrice: 10,
+    productIcon: "🥚",
+    description: "Маленький пушистый цыплёнок. Чирикает, когда голоден, и радостно машет крылышками после еды!",
+    soundType: "chicken"
+  },
   [AnimalSpecies.CHICKEN]: {
     species: AnimalSpecies.CHICKEN,
     nameRu: "Курица Коко",
@@ -574,7 +588,7 @@ export const UPGRADES: Record<string, FarmUpgrade> = {
 
 export const WORKER_DESCRIPTIONS: Record<string, string> = {
   "worker-papa": "Наводит порядок на ферме и гладит зверушек — поднимает им настроение!",
-  "worker-mama": "Кормит голодных зверушек, если в инвентаре есть их любимая еда.",
+  "worker-mama": "Кормит голодных зверушек в своей зоне и ездит на другие локации, если нужно.",
   "worker-nadya": "Поливает сухие грядки, сажает семена и собирает спелый урожай.",
   "worker-lena": "Собирает продукты у животных, яблоки и вишни с деревьев.",
   "worker-pasha": "Чистит животных мягкой щёткой и поднимает им настроение.",
@@ -585,18 +599,19 @@ export const WORKER_DESCRIPTIONS: Record<string, string> = {
   "worker-misha": "Пасёт овечек в лесу и помогает их стричь, когда шерсть готова.",
   "worker-masha": "Ночью находит падающие звёзды и приносит монетки.",
   "worker-sergey": "Чинит постройки и помогает дедушке Андрею в саду.",
-  "worker-pastuh": "Следит за загонами: загоняет разбежавшихся зверушек обратно в огороженный дворик.",
+  "worker-pastuh": "Загоняет зверушек в загон и подкармливает голодных на лугу.",
   "worker-kolya": "Помогает бабушке Наде — поливает дополнительные грядки и ухаживает за рассадой.",
   "worker-vera": "Поливает сухие грядки на огороде — отличный помощник с лейкой!",
   "worker-fyodor": "Сажает нужные семена на пустые грядки — знает, чем кормить зверушек.",
   "worker-sonya": "Собирает спелый урожай с грядок и складывает в рюкзак.",
   "worker-grisha": "Юный поливальщик — бегает между рядками и не даёт растениям засохнуть.",
-  "worker-nina": "Собирает яйца и перья, следит за порядком в курятнике.",
+  "worker-nina": "Кормит птиц, собирает яйца и перья — ездит туда, где нужна помощь.",
   "worker-olya": "Ухаживает за кроликами — кормит и собирает пушистые подарки.",
-  "worker-vika": "Следит за свинками: чистит и собирает их продукцию.",
+  "worker-vika": "Кормит свинок, чистит их и собирает продукцию.",
   "worker-igor": "Пасёт фенеков и верблюдов в пустыне, приносит монетки с оазиса.",
   "worker-tolya": "Гладит динозавров и поднимает им настроение в лесу.",
-  "worker-zoya": "Кормит лебедей у озера и собирает перья и яйца.",
+  "worker-zoya": "Кормит уток, гусей и лебедей у воды и собирает перья.",
+  "worker-petya": "Помогает кормить птиц на разных локациях — быстро разносит зерно.",
   "worker-roman": "Живёт в доме Макса бесплатно: открывает магазин мебели и радует питомцев.",
 };
 
@@ -614,8 +629,8 @@ export const INITIAL_STATE: PlayerState = {
   },
   animals: [
     {
-      id: "init-chicken",
-      species: AnimalSpecies.CHICKEN,
+      id: "init-chick",
+      species: AnimalSpecies.CHICK,
       customName: "Цыпа",
       isFed: false,
       fedTimeRemaining: 0,
@@ -757,7 +772,7 @@ export const INITIAL_STATE: PlayerState = {
     },
     {
       id: "worker-misha",
-      name: "Кузен Миша",
+      name: "Дядя Марк",
       emoji: "👦🏻",
       roleRu: "Лесной Пастух",
       dailyWage: 28,
@@ -768,7 +783,7 @@ export const INITIAL_STATE: PlayerState = {
     },
     {
       id: "worker-masha",
-      name: "Бабушка Маша",
+      name: "Тётя Катя",
       emoji: "👵🏽",
       roleRu: "Ночная Звездочёт",
       dailyWage: 36,
@@ -779,7 +794,7 @@ export const INITIAL_STATE: PlayerState = {
     },
     {
       id: "worker-sergey",
-      name: "Дядя Сергей",
+      name: "Дядя Денис",
       emoji: "🧑🏻‍🔧",
       roleRu: "Мастер на все руки",
       dailyWage: 44,
@@ -801,7 +816,7 @@ export const INITIAL_STATE: PlayerState = {
     },
     {
       id: "worker-kolya",
-      name: "Коля Помощник",
+      name: "Артём Иванов",
       emoji: "👦",
       roleRu: "Юный Садовник",
       dailyWage: 22,
@@ -812,7 +827,7 @@ export const INITIAL_STATE: PlayerState = {
     },
     {
       id: "worker-vera",
-      name: "Тётя Вера",
+      name: "Тётя Яна",
       emoji: "👩‍🌾",
       roleRu: "Поливальщица",
       dailyWage: 26,
@@ -823,7 +838,7 @@ export const INITIAL_STATE: PlayerState = {
     },
     {
       id: "worker-fyodor",
-      name: "Дед Фёдор",
+      name: "Дядя деда Дима",
       emoji: "👴",
       roleRu: "Сеятель",
       dailyWage: 32,
@@ -856,18 +871,29 @@ export const INITIAL_STATE: PlayerState = {
     },
     {
       id: "worker-nina",
-      name: "Тётя Нина",
+      name: "Тётя Диана",
       emoji: "👩‍🌾",
       roleRu: "Хозяйка Курятника",
       dailyWage: 28,
       isActive: false,
       color: "from-rose-400 to-pink-500",
-      statusText: "Собирает яйца и следит за птицами в загоне",
+      statusText: "Кормит птиц, собирает яйца и следит за курятником",
       assignedLocationId: "MEADOW"
     },
     {
+      id: "worker-petya",
+      name: "Дядя Гламурный Дима",
+      emoji: "👦",
+      roleRu: "Помощник Птичника",
+      dailyWage: 22,
+      isActive: false,
+      color: "from-yellow-300 to-amber-400",
+      statusText: "Разносит зерно цыплятам и курам на всех локациях",
+      assignedLocationId: "BARNYARD"
+    },
+    {
       id: "worker-olya",
-      name: "Оля Крольчиха",
+      name: "Вассилиса",
       emoji: "👧",
       roleRu: "Кроличья Няня",
       dailyWage: 24,
@@ -889,7 +915,7 @@ export const INITIAL_STATE: PlayerState = {
     },
     {
       id: "worker-igor",
-      name: "Игорь Степняк",
+      name: "Куликов",
       emoji: "🧔",
       roleRu: "Хранитель Пустыни",
       dailyWage: 34,
@@ -900,7 +926,7 @@ export const INITIAL_STATE: PlayerState = {
     },
     {
       id: "worker-tolya",
-      name: "Толя Динозавролог",
+      name: "Влад",
       emoji: "👨‍🔬",
       roleRu: "Палеонтолог",
       dailyWage: 40,
@@ -935,7 +961,7 @@ export const INITIAL_STATE: PlayerState = {
   ],
   pens: createInitialPenStates(),
   buildings: {
-    MEADOW: [],
+    MEADOW: ["max_house"],
     BARNYARD: [],
     MAX_HOME: [],
     GARDEN: [],
@@ -1197,16 +1223,23 @@ export function loadSavedGameState(): PlayerState {
         ? { ...INITIAL_STATE.upgrades, ...parsed.upgrades }
         : { ...INITIAL_STATE.upgrades },
       stats: parsed.stats && typeof parsed.stats === "object" ? { ...INITIAL_STATE.stats, ...parsed.stats } : { ...INITIAL_STATE.stats },
-      buildings: parsed.buildings && typeof parsed.buildings === "object"
-        ? {
-            ...INITIAL_STATE.buildings,
-            ...parsed.buildings,
-            GARDEN: parsed.buildings.GARDEN ?? [],
-            MAX_HOME: parsed.buildings.MAX_HOME ?? [],
-            HILLS: parsed.buildings.HILLS ?? [],
-            VALLEY: parsed.buildings.VALLEY ?? [],
-          }
-        : { ...INITIAL_STATE.buildings },
+      buildings: (() => {
+        const base: Record<string, string[]> = parsed.buildings && typeof parsed.buildings === "object"
+          ? {
+              ...INITIAL_STATE.buildings,
+              ...parsed.buildings,
+              GARDEN: parsed.buildings.GARDEN ?? [],
+              MAX_HOME: parsed.buildings.MAX_HOME ?? [],
+              HILLS: parsed.buildings.HILLS ?? [],
+              VALLEY: parsed.buildings.VALLEY ?? [],
+            }
+          : { ...INITIAL_STATE.buildings };
+        const meadow = base.MEADOW ?? [];
+        if (!meadow.includes("max_house")) {
+          base.MEADOW = [...meadow, "max_house"];
+        }
+        return base;
+      })(),
       workers,
       pens: (() => {
         const defaults = createInitialPenStates();

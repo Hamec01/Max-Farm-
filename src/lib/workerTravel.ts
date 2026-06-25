@@ -1,7 +1,12 @@
 import { ANIMAL_TEMPLATES } from "../data";
 import { WORLD_ZONES } from "../data/locations";
 import { AnimalInstance, AnimalSpecies, LocationId } from "../types";
-import { resolveAnimalFood } from "./farmAutomation";
+import {
+  resolveAnimalFood,
+  getAnimalHomeZone,
+  POULTRY_SPECIES,
+  WATER_BIRD_SPECIES,
+} from "./farmAutomation";
 
 const ANIMAL_ZONES: LocationId[] = [...WORLD_ZONES, "MAX_HOME"];
 
@@ -14,9 +19,7 @@ const GARDEN_WORKERS = new Set([
   "worker-grisha",
 ]);
 
-export function getAnimalHomeZone(animal: AnimalInstance): LocationId {
-  return (animal.locationId || "MEADOW") as LocationId;
-}
+export { getAnimalHomeZone };
 
 function firstZoneMatching(
   animals: AnimalInstance[],
@@ -88,12 +91,13 @@ export function pickWorkerTravelZone(
       );
 
     case "worker-nina":
+    case "worker-petya":
       return (
         firstZoneMatching(
           animals,
           (a) =>
-            a.productionProgress >= 100 &&
-            [AnimalSpecies.CHICKEN, AnimalSpecies.DUCK, AnimalSpecies.GOOSE].includes(a.species)
+            POULTRY_SPECIES.includes(a.species) &&
+            (!a.isFed || a.productionProgress >= 100)
         ) || homeZone
       );
 
@@ -111,12 +115,14 @@ export function pickWorkerTravelZone(
       return (
         firstZoneMatching(
           animals,
-          (a) => a.species === AnimalSpecies.PIG && !a.isFed
+          (a) =>
+            a.species === AnimalSpecies.PIG &&
+            (!a.isFed || a.productionProgress >= 100 || a.cleanliness < 75)
         ) || homeZone
       );
 
     case "worker-pastuh":
-      return homeZone;
+      return findHungryFeedableZone(animals, inventory) || homeZone;
 
     case "worker-andrey":
       return "ORCHARD";
@@ -133,8 +139,17 @@ export function pickWorkerTravelZone(
       return "DESERT";
 
     case "worker-masha":
-    case "worker-zoya":
       return "LAKE";
+
+    case "worker-zoya":
+      return (
+        firstZoneMatching(
+          animals,
+          (a) =>
+            WATER_BIRD_SPECIES.includes(a.species) &&
+            (!a.isFed || a.productionProgress >= 100)
+        ) || "LAKE"
+      );
 
     case "worker-tolya":
       return "FOREST";

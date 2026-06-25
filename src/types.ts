@@ -4,6 +4,7 @@
  */
 
 export enum AnimalSpecies {
+  CHICK = "CHICK",
   CHICKEN = "CHICKEN",
   DUCK = "DUCK",
   GOOSE = "GOOSE",

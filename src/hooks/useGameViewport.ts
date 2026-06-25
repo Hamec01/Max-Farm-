@@ -12,9 +12,8 @@ export interface GameViewport {
 }
 
 function getDeviceKind(width: number, height: number): DeviceKind {
-  // Короткая сторона — телефон остаётся телефоном и в альбомной ориентации
   const shortSide = Math.min(width, height);
-  if (shortSide < 768) return "phone";
+  if (shortSide < 640) return "phone";
   if (shortSide < 1024) return "tablet";
   return "desktop";
 }
@@ -35,14 +34,14 @@ export function computeZoomScale(width: number, height: number, kind: DeviceKind
     return isLandscape ? 1.38 : 1.54;
   }
 
-  // Телефон — портрет ближе, альбом чуть отдаляем (больше горизонтали)
+  // Телефон — ближе камера (мир не влезает целиком; огород — отдельный zoom в App)
   let zoom: number;
-  if (minDim <= 360) zoom = 1.88;
-  else if (minDim <= 390) zoom = 1.78;
-  else if (minDim <= 430) zoom = 1.68;
-  else zoom = 1.62;
+  if (minDim <= 360) zoom = 2.28;
+  else if (minDim <= 390) zoom = 2.18;
+  else if (minDim <= 430) zoom = 2.08;
+  else zoom = 2.0;
 
-  if (isLandscape) zoom = Math.max(1.48, zoom - 0.14);
+  if (isLandscape) zoom = Math.max(1.88, zoom - 0.12);
   return zoom;
 }
 

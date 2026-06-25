@@ -143,3 +143,19 @@ body {
   scrollbar-width: none;
 }
 
+/* Телефон / планшет: меньше декоративных анимаций — выше FPS */
+.mobile-lite .animate-drift-cloud-1,
+.mobile-lite .animate-drift-cloud-2,
+.mobile-lite .animate-ping {
+  animation: none !important;
+}
+
+.mobile-lite .animate-pulse {
+  animation-duration: 3s;
+}
+
+.mobile-lite .filter.drop-shadow-md,
+.mobile-lite .filter.drop-shadow {
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.2));
+}
+

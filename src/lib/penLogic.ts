@@ -2,6 +2,7 @@ import { AnimalSpecies, AnimalInstance, PenTemplate, PenState, PenType } from ".
 import { PEN_TEMPLATES } from "../data/pens";
 
 const CHICKEN_GROUP: AnimalSpecies[] = [
+  AnimalSpecies.CHICK,
   AnimalSpecies.CHICKEN,
   AnimalSpecies.DUCK,
   AnimalSpecies.GOOSE,
@@ -75,7 +76,7 @@ export function getPenTypeEmoji(penType: PenType): string {
 
 export function getPenTypeLabel(penType: PenType): string {
   switch (penType) {
-    case "CHICKEN": return "куры, утки, гуси, индейки, павлины";
+    case "CHICKEN": return "цыплята, куры, утки, гуси, индейки, павлины";
     case "RABBIT": return "кролики";
     case "SHEEP": return "овечки";
     case "PIG": return "свинки";

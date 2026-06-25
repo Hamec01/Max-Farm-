@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import { WorkerSVG } from "./WorkerSVG";
+import { GameRoom } from "./gameRoom/GameRoom";
 import { playClickSound } from "../lib/audio";
 import { beginLongPress, endLongPress } from "../lib/input/longPress";
 import { reportInputDebug } from "../lib/input/inputDebug";
@@ -7,13 +8,16 @@ import { reportInputDebug } from "../lib/input/inputDebug";
 interface MaxHomeInteriorProps {
   ownedFurniture: string[];
   onOpenShop: () => void;
+  onImmersiveChange?: (immersive: boolean) => void;
 }
 
 /** Роман-домовой — всегда в доме, идёт в комплекте */
 export const MaxHomeInterior: React.FC<MaxHomeInteriorProps> = ({
   ownedFurniture,
   onOpenShop,
+  onImmersiveChange,
 }) => {
+  const [inGameRoom, setInGameRoom] = useState(false);
   const has = (id: string) => ownedFurniture.includes(id);
   const isEmpty = ownedFurniture.length === 0;
 
@@ -27,6 +31,10 @@ export const MaxHomeInterior: React.FC<MaxHomeInteriorProps> = ({
 
   return (
     <div className="absolute inset-0 z-0 select-none" id="max-home-interior">
+      {inGameRoom ? (
+        <GameRoom onBack={() => setInGameRoom(false)} onImmersiveChange={onImmersiveChange} />
+      ) : (
+        <>
       <div className="absolute inset-x-0 top-0 bottom-[38%] bg-gradient-to-b from-amber-100 via-orange-50 to-amber-200 pointer-events-none" />
       <div className="absolute inset-x-0 top-0 h-[8%] bg-[#92400E]/20 pointer-events-none" />
       <div className="absolute inset-x-0 bottom-0 top-[62%] bg-gradient-to-t from-amber-800 via-amber-700 to-amber-600 pointer-events-none">
@@ -176,6 +184,27 @@ export const MaxHomeInterior: React.FC<MaxHomeInteriorProps> = ({
       <div className="absolute left-1/2 -translate-x-1/2 top-[22%] text-[11px] font-black text-amber-900 bg-white/80 px-3 py-1 rounded-full border-2 border-amber-700 shadow pointer-events-none z-10">
         🏠 Дом Макса {isEmpty ? "— пусто" : `— ${ownedFurniture.length} вещей`}
       </div>
+
+      {/* Дверь в игровую комнату */}
+      <button
+        type="button"
+        onClick={() => {
+          playClickSound();
+          setInGameRoom(true);
+        }}
+        className="absolute z-25 pointer-events-auto touch-none active:scale-95 transition-transform"
+        style={{ right: "12%", top: "48%" }}
+        aria-label="Игровая комната"
+      >
+        <div className="px-2 py-1 bg-violet-100 border-2 border-violet-600 text-violet-950 rounded-xl text-[8px] font-black whitespace-nowrap mb-1 shadow animate-pulse">
+          🎮 Играть!
+        </div>
+        <div className="w-14 h-20 bg-gradient-to-b from-violet-400 to-violet-600 border-4 border-violet-900 rounded-t-full rounded-b-lg shadow-lg flex items-center justify-center text-2xl">
+          🚪
+        </div>
+      </button>
+        </>
+      )}
     </div>
   );
 };

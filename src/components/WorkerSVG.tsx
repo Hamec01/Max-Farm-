@@ -3,6 +3,8 @@ import React from "react";
 interface WorkerSVGProps {
   workerId: string;
   className?: string;
+  /** field — на локации (ноги к земле); portrait — лицо в карточке магазина */
+  variant?: "field" | "portrait";
 }
 
 function Boots() {
@@ -30,7 +32,29 @@ function Face({ skin = "#FFE4C4", hair = "#78350F" }: { skin?: string; hair?: st
   );
 }
 
-export const WorkerSVG: React.FC<WorkerSVGProps> = ({ workerId, className = "w-16 h-18 filter drop-shadow-md" }) => {
+const CUSTOM_WORKER_SPRITES = new Set([
+  "worker-papa",
+  "worker-mama",
+  "worker-nadya",
+  "worker-lena",
+  "worker-andrey",
+  "worker-dima",
+  "worker-arina",
+  "worker-sveta",
+  "worker-sergey",
+  "worker-masha",
+  "worker-misha",
+  "worker-pastuh",
+  "worker-petya",
+  "worker-olya",
+  "worker-nina",
+  "worker-fyodor",
+  "worker-vera",
+  "worker-igor",
+  "worker-kolya",
+]);
+
+function WorkerSVGFallback({ workerId, className }: WorkerSVGProps) {
   switch (workerId) {
     case "worker-mama":
       return (
@@ -429,4 +453,32 @@ export const WorkerSVG: React.FC<WorkerSVGProps> = ({ workerId, className = "w-1
     default:
       return null;
   }
+}
+
+export const WorkerSVG: React.FC<WorkerSVGProps> = ({
+  workerId,
+  className = "w-16 h-20 filter drop-shadow-md",
+  variant = "field",
+}) => {
+  const [spriteFailed, setSpriteFailed] = React.useState(false);
+
+  React.useEffect(() => {
+    setSpriteFailed(false);
+  }, [workerId]);
+
+  if (CUSTOM_WORKER_SPRITES.has(workerId) && !spriteFailed) {
+    return (
+      <img
+        src={`/assets/characters/workers/${workerId}.png`}
+        alt={workerId}
+        className={`${className} object-contain select-none ${
+          variant === "portrait" ? "object-top w-[150%] h-[150%] max-w-none" : "object-bottom"
+        }`}
+        draggable={false}
+        onError={() => setSpriteFailed(true)}
+      />
+    );
+  }
+
+  return <WorkerSVGFallback workerId={workerId} className={className} />;
 };

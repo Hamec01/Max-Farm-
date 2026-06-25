@@ -22,23 +22,35 @@ let nameSpeechTimeout: ReturnType<typeof setTimeout> | null = null;
 let activeCharacterAudio: HTMLAudioElement | null = null;
 let bgMusic: HTMLAudioElement | null = null;
 let musicMode: "day" | "night" | null = null;
+let musicSession = 0;
+let musicFadeTimer: ReturnType<typeof setInterval> | null = null;
+/** Все экземпляры фоновой музыки — гарантия «только один трек» */
+const musicRegistry = new Set<HTMLAudioElement>();
 let lastFootstepMs = 0;
 let voicesLoaded = false;
 
+/** Громкость фоновой музыки — тише SFX и голосов */
+const BG_MUSIC_VOLUME = 0.1;
+const MUSIC_FADE_MS = 350;
+
 const DAY_MUSIC = [
-  "/assets/audio/music/day/01.mp3",
-  "/assets/audio/music/day/02.mp3",
-  "/assets/audio/music/day/03.mp3",
-  "/assets/audio/music/day/04.mp3",
-  "/assets/audio/music/day/05.mp3",
+  "/assets/audio/music/day/01-harvest-hop.mp3",
+  "/assets/audio/music/day/02-harvest-hop.mp3",
+  "/assets/audio/music/day/03-harvest-hop.mp3",
+  "/assets/audio/music/day/04-harvest-hop.mp3",
+  "/assets/audio/music/day/05-hayseed-parade.mp3",
+  "/assets/audio/music/day/06-hayseed-parade.mp3",
+  "/assets/audio/music/day/07-barnyard-moonhop.mp3",
+  "/assets/audio/music/day/08-barnyard-moonhop.mp3",
+  "/assets/audio/music/day/09-sunlit-barn-waltz.mp3",
+  "/assets/audio/music/day/10-sunlit-barn-waltz.mp3",
 ];
 
 const NIGHT_MUSIC = [
-  "/assets/audio/music/night/01.mp3",
-  "/assets/audio/music/night/02.mp3",
-  "/assets/audio/music/night/03.mp3",
-  "/assets/audio/music/night/04.mp3",
-  "/assets/audio/music/night/05.mp3",
+  "/assets/audio/music/night/01-sunbeam-playroom.mp3",
+  "/assets/audio/music/night/02-sunbeam-playroom.mp3",
+  "/assets/audio/music/night/03-sunny-pillow-parade.mp3",
+  "/assets/audio/music/night/04-sunny-pillow-parade.mp3",
 ];
 
 const ANIMAL_SOUND_MS: Record<string, number> = {
@@ -229,6 +241,16 @@ export function playStarSound() {
   setTimeout(() => synthBlip(1046, 0.2, 0.08), 160);
 }
 
+const DOG_BARK_SRC = "/assets/audio/sfx/dog.ogg";
+
+/** Лай собаки — подбрасывание питомца или пазл со щенком */
+export function playDogBarkSound() {
+  if (getMuteState()) return;
+  tryPlayAudioFile(DOG_BARK_SRC, "sfx").then((played) => {
+    if (!played) playAnimalSound("dog");
+  });
+}
+
 export function playFootstepSound() {
   const now = Date.now();
   if (now - lastFootstepMs < 340) return;
@@ -283,35 +305,137 @@ export function playWindAmbient() {
   });
 }
 
+function clearMusicFadeTimer() {
+  if (musicFadeTimer) {
+    clearInterval(musicFadeTimer);
+    musicFadeTimer = null;
+  }
+}
+
+function detachBgMusic(audio: HTMLAudioElement) {
+  audio.oncanplaythrough = null;
+  audio.onended = null;
+  audio.onerror = null;
+  musicRegistry.delete(audio);
+}
+
+function killMusicElement(audio: HTMLAudioElement) {
+  detachBgMusic(audio);
+  audio.pause();
+  audio.currentTime = 0;
+  audio.removeAttribute("src");
+  audio.load();
+}
+
+/** Мгновенно глушит ВСЕ фоновые треки (день + ночь + «зомби» из колбэков) */
+function killAllBackgroundTracks(except?: HTMLAudioElement) {
+  clearMusicFadeTimer();
+  for (const audio of [...musicRegistry]) {
+    if (except && audio === except) continue;
+    killMusicElement(audio);
+  }
+  if (!except || bgMusic !== except) {
+    bgMusic = except ?? null;
+  }
+}
+
+function fadeVolume(
+  audio: HTMLAudioElement,
+  from: number,
+  to: number,
+  durationMs: number,
+  onDone?: () => void
+) {
+  clearMusicFadeTimer();
+  const steps = Math.max(4, Math.round(durationMs / 40));
+  const stepMs = durationMs / steps;
+  let step = 0;
+  audio.volume = from;
+  musicFadeTimer = setInterval(() => {
+    if (!musicRegistry.has(audio)) {
+      clearMusicFadeTimer();
+      onDone?.();
+      return;
+    }
+    step++;
+    const t = step / steps;
+    audio.volume = from + (to - from) * t;
+    if (step >= steps) {
+      clearMusicFadeTimer();
+      audio.volume = to;
+      onDone?.();
+    }
+  }, stepMs);
+}
+
 function pickRandomTrack(list: string[]): string[] {
   return [...list].sort(() => Math.random() - 0.5);
 }
 
-function playMusicFromList(paths: string[], index = 0) {
-  if (getMuteState() || index >= paths.length) return;
+function playMusicFromList(
+  paths: string[],
+  index = 0,
+  session: number,
+  mode: "day" | "night",
+  fadeIn = true
+) {
+  if (getMuteState() || paths.length === 0 || index >= paths.length) return;
+  if (session !== musicSession || musicMode !== mode) return;
+
+  killAllBackgroundTracks();
 
   const audio = new Audio(paths[index]);
-  audio.volume = 0.22;
+  audio.volume = fadeIn ? 0 : BG_MUSIC_VOLUME;
+  musicRegistry.add(audio);
   bgMusic = audio;
 
-  audio.oncanplaythrough = () => {
-    audio.play().catch(() => playMusicFromList(paths, index + 1));
+  const tryPlay = () => {
+    if (session !== musicSession || musicMode !== mode || bgMusic !== audio || getMuteState()) {
+      killMusicElement(audio);
+      if (bgMusic === audio) bgMusic = null;
+      return;
+    }
+    audio
+      .play()
+      .then(() => {
+        if (session !== musicSession || musicMode !== mode || bgMusic !== audio) {
+          killMusicElement(audio);
+          if (bgMusic === audio) bgMusic = null;
+          return;
+        }
+        if (fadeIn) {
+          fadeVolume(audio, 0, BG_MUSIC_VOLUME, MUSIC_FADE_MS);
+        } else {
+          audio.volume = BG_MUSIC_VOLUME;
+        }
+      })
+      .catch(() => {
+        if (session === musicSession && musicMode === mode) {
+          playMusicFromList(paths, index + 1, session, mode, fadeIn);
+        }
+      });
   };
-  audio.onerror = () => playMusicFromList(paths, index + 1);
-  audio.onended = () => {
-    if (bgMusic === audio && !getMuteState()) {
-      playMusicFromList(pickRandomTrack(paths));
+
+  audio.oncanplaythrough = tryPlay;
+  audio.onerror = () => {
+    if (session === musicSession && musicMode === mode) {
+      playMusicFromList(paths, index + 1, session, mode, fadeIn);
     }
   };
+  audio.onended = () => {
+    if (session !== musicSession || musicMode !== mode || bgMusic !== audio || getMuteState()) return;
+    playMusicFromList(pickRandomTrack(paths), 0, session, mode, true);
+  };
   audio.load();
+
+  if (audio.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
+    tryPlay();
+  }
 }
 
 export function stopBackgroundMusic() {
-  if (bgMusic) {
-    bgMusic.pause();
-    bgMusic.src = "";
-    bgMusic = null;
-  }
+  musicSession++;
+  killAllBackgroundTracks();
   musicMode = null;
 }
 
@@ -322,10 +446,35 @@ export function updateBackgroundMusic(isNight: boolean) {
   }
 
   const mode: "day" | "night" = isNight ? "night" : "day";
-  if (musicMode === mode && bgMusic && !bgMusic.paused) return;
-
-  stopBackgroundMusic();
-  musicMode = mode;
   const list = mode === "night" ? NIGHT_MUSIC : DAY_MUSIC;
-  playMusicFromList(pickRandomTrack(list));
+  if (list.length === 0) {
+    stopBackgroundMusic();
+    return;
+  }
+
+  if (musicMode === mode && bgMusic && musicRegistry.has(bgMusic)) return;
+
+  const prev = bgMusic;
+  const prevMode = musicMode;
+  const session = musicSession + 1;
+  musicSession = session;
+  musicMode = mode;
+
+  const startNext = () => {
+    if (session !== musicSession || musicMode !== mode) return;
+    playMusicFromList(pickRandomTrack(list), 0, session, mode, true);
+  };
+
+  if (prev && musicRegistry.has(prev) && prevMode && prevMode !== mode) {
+    clearMusicFadeTimer();
+    fadeVolume(prev, prev.volume, 0, MUSIC_FADE_MS, () => {
+      killMusicElement(prev);
+      if (bgMusic === prev) bgMusic = null;
+      startNext();
+    });
+    return;
+  }
+
+  killAllBackgroundTracks();
+  startNext();
 }
