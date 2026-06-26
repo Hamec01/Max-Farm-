@@ -20,3 +20,9 @@ function buildGardenPlotCoords(): Record<string, { x: number; y: number }> {
 }
 
 export const GARDEN_PLOT_COORDS = buildGardenPlotCoords();
+
+/** Точка подхода к грядке — чуть ниже ряда, чтобы NPC стоял перед ней */
+export function getGardenPlotApproach(plotId: string): { x: number; y: number } {
+  const c = GARDEN_PLOT_COORDS[plotId] ?? { x: 50, y: 62 };
+  return { x: c.x, y: c.y + 4 };
+}

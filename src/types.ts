@@ -261,3 +261,13 @@ export interface FallingStar {
   collected: boolean;
   size: number;
 }
+
+export interface Flower {
+  id: string;
+  x: number;
+  y: number;
+  emoji: string;
+  bouquetKey: string;
+  /** небольшая фаза для покачивания на ветру */
+  swayDelay: number;
+}

@@ -218,6 +218,49 @@ export function waterOneDryGardenPlot(crops: Record<string, CropInstance>): bool
   return false;
 }
 
+export function waterGardenPlot(
+  crops: Record<string, CropInstance>,
+  plotId: string
+): boolean {
+  const crop = crops[plotId];
+  if (crop && crop.progress > 0 && crop.progress < 100 && !crop.isWatered) {
+    crop.isWatered = true;
+    return true;
+  }
+  return false;
+}
+
+export function plantGardenPlot(
+  crops: Record<string, CropInstance>,
+  plotId: string,
+  cropOrder: CropType[],
+  inventory: Record<string, number>,
+  coins: number
+): { planted: boolean; coinsSpent: number } {
+  const crop = crops[plotId];
+  if (!crop || crop.progress !== 0 || crop.isDead) {
+    return { planted: false, coinsSpent: 0 };
+  }
+  const plotNum = parseInt(plotId.replace("plot", ""), 10) || 0;
+  const offset = plotNum % Math.max(cropOrder.length, 1);
+  const rotated = [...cropOrder.slice(offset), ...cropOrder.slice(0, offset)];
+  const pick = pickCropSeedForWorker(rotated, inventory, coins);
+  if (!pick) return { planted: false, coinsSpent: 0 };
+
+  crops[plotId] = {
+    id: plotId,
+    type: pick.crop,
+    progress: 2,
+    isWatered: true,
+    isDead: false,
+    timeRemaining: CROPS_CONFIG[pick.crop].growTime,
+  };
+  if (pick.fromInventory) {
+    inventory[pick.seed] = (inventory[pick.seed] || 1) - 1;
+  }
+  return { planted: true, coinsSpent: pick.fromInventory ? 0 : pick.cost };
+}
+
 /** Собрать один спелый урожай */
 export function harvestOneRipeGardenPlot(
   crops: Record<string, CropInstance>,
@@ -236,4 +279,20 @@ export function harvestOneRipeGardenPlot(
     }
   }
   return false;
+}
+
+export function harvestGardenPlot(
+  crops: Record<string, CropInstance>,
+  plotId: string,
+  inventory: Record<string, number>,
+  compostLvl: number
+): boolean {
+  const crop = crops[plotId];
+  if (!crop || crop.progress < 100 || crop.isDead) return false;
+  const config = CROPS_CONFIG[crop.type];
+  const harvestYield = config.yieldCount + Math.min(compostLvl, 2);
+  inventory[crop.type] = (inventory[crop.type] || 0) + harvestYield;
+  crop.progress = 0;
+  crop.isWatered = false;
+  return true;
 }

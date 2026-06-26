@@ -80,7 +80,7 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
           src={spriteSrc}
           alt={`${species} ${spriteBaseName}`}
           referrerPolicy="no-referrer"
-          className="w-full h-full object-contain select-none transition-transform active:scale-95 duration-200"
+          className="w-full h-full object-contain select-none"
           onError={() => {
             const nextIndex = candidateIndex + 1;
             if (nextIndex < spriteCandidates.length) {

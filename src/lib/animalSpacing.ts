@@ -1,4 +1,5 @@
 import type { AnimalInstance, LocationId } from "../types";
+import { isAnimalAirborne } from "./tossPhysics";
 
 /** Minimum center-to-center distance so large animal sprites don't overlap */
 export const MIN_ANIMAL_DIST = 12;
@@ -66,6 +67,19 @@ export function separateAnimalsByLocation(animals: AnimalInstance[]): AnimalInst
   });
 
   return result;
+}
+
+/** Separate only grounded animals; airborne keep in-flight positions */
+export function separateAnimalsByLocationSkipAirborne(animals: AnimalInstance[]): AnimalInstance[] {
+  const airborneIds = new Set(
+    animals.filter(isAnimalAirborne).map((a) => a.id)
+  );
+  if (airborneIds.size === 0) return separateAnimalsByLocation(animals);
+  const grounded = animals.filter((a) => !airborneIds.has(a.id));
+  if (grounded.length < 2) return animals;
+  const separated = separateAnimalsByLocation(grounded);
+  const byId = new Map(separated.map((a) => [a.id, a]));
+  return animals.map((a) => (airborneIds.has(a.id) ? a : (byId.get(a.id) ?? a)));
 }
 
 /** Steer a wandering animal away from neighbours in the same location */

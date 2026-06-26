@@ -3,14 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useLayoutEffect, useRef, startTransition } from "react";
-import { PlayerState, AnimalSpecies, LocationId, CropType, TreeType, AnimalInstance, CropInstance, TreeInstance, Butterfly, FallingStar } from "./types";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { PlayerState, AnimalSpecies, LocationId, CropType, TreeType, AnimalInstance, CropInstance, TreeInstance, Butterfly, FallingStar, Flower } from "./types";
 import { INITIAL_STATE, ANIMAL_TEMPLATES, CROPS_CONFIG, TREES_CONFIG, LOCATIONS, UPGRADES, BUILDINGS_TEMPLATES, WORKER_DESCRIPTIONS, loadSavedGameState } from "./data";
 import { GameHeader } from "./components/GameHeader";
 import { CoinIcon, CoinPrice, FloatParticle, GameIcon } from "./components/CoinIcon";
 import { AnimalShopIcon, SkillIcon, WorkerShopIcon } from "./components/ShopIcons";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { AnimalSVG } from "./components/AnimalSVG";
+import { GroundFoliage } from "./components/GroundFoliage";
 import {
   playLevelUpSound,
   playClickSound,
@@ -53,27 +54,29 @@ import {
   isLiteEffects,
 } from "./lib/mobileCamera";
 import { stepBoyWalk, BOY_FOOTSTEP_EVERY, type BoyWalkState } from "./lib/boyMovement";
+import { createZoneFlower, getBouquetCatalogEntry, getZoneFlora, seedZoneFlowers } from "./data/zoneFlora";
 import {
-  applyAnimalTossDom,
   applyKinematicsToAnimal,
-  applyWorkerTossDom,
-  animalToKinematics,
+  clearDragRoamerDom,
   computeThrowVelocity,
   isAnimalAirborne,
-  needsTossSimulation,
+  placeAnimalDom,
+  placeWorkerDom,
   resolveGroundY,
   resolveWorkerGroundY,
+  setDragRoamerPosition,
   stepToss,
+  stepWalk,
   TOSS_MAX_ANGLE,
+  workerAirborne,
 } from "./lib/tossPhysics";
 import {
   setPerformanceDeviceKind,
-  physicsLoopMs,
   gameTickMs,
   shouldSpinTossedSprites,
 } from "./lib/performanceProfile";
 import {
-  separateAnimalsByLocation,
+  separateAnimalsByLocationSkipAirborne,
   wanderAnimalAvoidingOthers,
   findAnimalSpawnPosition,
 } from "./lib/animalSpacing";
@@ -103,6 +106,18 @@ import {
   GARDEN_PLOT_IDS,
 } from "./lib/farmAutomation";
 import { pickWorkerTravelZone, randomSpotInZone, ZONE_TRAVEL_LABEL } from "./lib/workerTravel";
+import {
+  beginZoneTravel,
+  canStartZoneTravel,
+  completeZoneExit,
+  findWorkerTaskTarget,
+  performWorkerTask,
+  randomWanderTarget,
+  WORKER_TRAVEL_WALK_SPEED,
+  WORKER_ARRIVE_DIST,
+  workerNeedsMovement,
+  type WorkerPositionState,
+} from "./lib/workerMovement";
 import { WORLD_ZONES, isInteriorZone } from "./data/locations";
 import { WorkerSVG } from "./components/WorkerSVG";
 import { ScarecrowSVG } from "./components/ScarecrowSVG";
@@ -179,21 +194,7 @@ export default function App() {
   const [showMaxWardrobe, setShowMaxWardrobe] = useState<boolean>(false);
   const [showLocationMap, setShowLocationMap] = useState<boolean>(false);
 
-  const [workersPositions, setWorkersPositions] = useState<Record<string, {
-    x: number;
-    y: number;
-    targetX: number;
-    targetY: number;
-    isMoving: boolean;
-    dir: "left" | "right";
-    actionLabel?: string;
-    actionTimer: number;
-    currentZone: LocationId;
-    vx?: number;
-    vy?: number;
-    angle?: number;
-    groundY?: number;
-  }>>({
+  const [workersPositions, setWorkersPositions] = useState<Record<string, WorkerPositionState>>({
     "worker-papa": { x: 25, y: 72, targetX: 25, targetY: 72, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MEADOW" },
     "worker-mama": { x: 38, y: 74, targetX: 38, targetY: 74, isMoving: false, dir: "right", actionTimer: 0, currentZone: "BARNYARD" },
     "worker-nadya": { x: 48, y: 76, targetX: 48, targetY: 76, isMoving: false, dir: "right", actionTimer: 0, currentZone: "GARDEN" },
@@ -223,6 +224,34 @@ export default function App() {
   });
   const workersPositionsRef = useRef(workersPositions);
   workersPositionsRef.current = workersPositions;
+
+  // Живые позиции для плавного движения (RAF — единственный владелец во время движения).
+  // Эти refs НЕ перезаписываются при ререндере, поэтому React не может «дёрнуть» спрайт.
+  const animalLiveRef = useRef<
+    Map<string, { x: number; y: number; angle: number; vx: number; vy: number }>
+  >(new Map());
+  const workerLiveRef = useRef<
+    Map<
+      string,
+      {
+        x: number;
+        y: number;
+        angle: number;
+        dir: "left" | "right";
+        moving: boolean;
+        vx: number;
+        vy: number;
+        groundY: number;
+      }
+    >
+  >(new Map());
+
+  /** Подставить живую RAF-позицию в state — иначе при смене цели спрайт прыгает назад */
+  const patchWorkerFromLive = (wid: string, w: WorkerPositionState): WorkerPositionState => {
+    const live = workerLiveRef.current.get(wid);
+    if (!live) return w;
+    return { ...w, x: live.x, y: live.y, dir: live.dir, isMoving: live.moving };
+  };
 
   const triggerWorkerActionFeedback = (_workerId: string, _x: number, _y: number, _label: string) => {
     // NPC работают тихо — визуальные эффекты только у действий игрока
@@ -286,19 +315,28 @@ export default function App() {
   const [butterflies, setButterflies] = useState<Butterfly[]>([]);
   const [fallingStars, setFallingStars] = useState<FallingStar[]>([]);
   const [pondFish, setPondFish] = useState<FishInstance[]>([]);
+  // 🌸 Собираемые цветы, растущие на траве
+  const [flowers, setFlowers] = useState<Flower[]>([]);
 
-  // Инициализируем бабочек (на телефоне — меньше)
+  // Инициализируем бабочек — теперь их можно собирать на любом устройстве
   useEffect(() => {
-    if (isPhone) {
-      setButterflies([]);
-      return;
-    }
     const initialButterflies: Butterfly[] = [
       { id: "b1", x: 30, y: 35, type: "green", emoji: "🦋", vx: 0.1, vy: -0.1 },
       { id: "b2", x: 65, y: 45, type: "pink", emoji: "🦋", vx: -0.12, vy: 0.08 },
     ];
-    setButterflies(initialButterflies);
+    // На телефоне оставляем одну бабочку, чтобы не нагружать слабые устройства
+    setButterflies(isPhone ? initialButterflies.slice(0, 1) : initialButterflies);
   }, [isPhone]);
+
+  // 🌸 Засеваем собираемые цветы на траве при заходе в уличные зоны (палитра зависит от локации)
+  useEffect(() => {
+    if (activeZone === "MAX_HOME" || !getZoneFlora(activeZone)) {
+      setFlowers([]);
+      return;
+    }
+    const count = isPhone ? 3 : 5;
+    setFlowers(seedZoneFlowers(activeZone, count));
+  }, [activeZone, isPhone]);
 
   // Рыбки в пруду (озеро LAKESIDE)
   useEffect(() => {
@@ -406,8 +444,8 @@ export default function App() {
       );
 
       // 3. Динамический спавн (каждые 100мс с маленькой вероятностью)
-      // А. Спавн бабочек (теперь максимум 3 на экране)
-      if (deviceKind !== "phone" && Math.random() < 0.005) {
+      // А. Спавн бабочек (собираются на всех устройствах)
+      if (Math.random() < 0.005) {
         setButterflies((prev) => {
           if (prev.length >= butterflyCap) return prev;
           const colors: ("blue" | "orange" | "purple" | "gold" | "pink" | "green")[] = ["blue", "orange", "purple", "gold", "pink", "green"];
@@ -428,6 +466,17 @@ export default function App() {
             vy: (Math.random() - 0.5) * 0.5
           };
           return [...prev, newB];
+        });
+      }
+
+      // А.2 Подсев новых цветов на траве (вырастают взамен собранных)
+      if (activeZone !== "MAX_HOME" && getZoneFlora(activeZone) && Math.random() < 0.01) {
+        const flowerCap = deviceKind === "phone" ? 3 : 6;
+        setFlowers((prev) => {
+          if (prev.length >= flowerCap) return prev;
+          const newF = createZoneFlower(activeZone, `flower-${Date.now()}-${Math.random()}`);
+          if (!newF) return prev;
+          return [...prev, newF];
         });
       }
 
@@ -454,8 +503,9 @@ export default function App() {
   }, [gameState.dayProgress, activeZone, deviceKind, isPhone]);
 
   // Сбор бабочки: за нее даются золотые монетки и опыт!
-  const handleCollectButterfly = (id: string, e: React.MouseEvent) => {
+  const handleCollectButterfly = (id: string, e: React.PointerEvent | React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     const butterfly = butterflies.find((b) => b.id === id);
     if (!butterfly) return;
 
@@ -509,6 +559,38 @@ export default function App() {
     });
 
     setFallingStars((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  // Сбор цветка: кладёт букет в рюкзак и даёт немного опыта
+  const handleCollectFlower = (id: string, e: React.PointerEvent | React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    setFlowers((prev) => {
+      const flower = prev.find((f) => f.id === id);
+      if (!flower) return prev;
+
+      const bouquetInfo = getBouquetCatalogEntry(flower.bouquetKey);
+
+      playButterflySound();
+      setGameState((prevState) => {
+        const updatedInventory = {
+          ...prevState.inventory,
+          [flower.bouquetKey]: (prevState.inventory[flower.bouquetKey] || 0) + 1,
+        };
+        setTimeout(() => {
+          spawnFloatHeart(flower.x, flower.y, `${flower.emoji} +1${bouquetInfo?.icon ?? "💐"}`);
+        }, 50);
+        const bouquetLabel = bouquetInfo?.nameRu ?? "букет";
+        triggerNotification(`${flower.emoji} Цветок сорван! В рюкзак положен ${bouquetLabel}.`);
+        return awardExperience(4, {
+          ...prevState,
+          inventory: updatedInventory,
+        });
+      });
+
+      return prev.filter((f) => f.id !== id);
+    });
   };
 
   // Sync mute + фоновая музыка день/ночь
@@ -579,6 +661,11 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (draggedAnimalId || draggedWorkerId) return;
+    // Не сохраняем посреди движения/подбрасывания
+    if (animalLiveRef.current.size > 0 || workerLiveRef.current.size > 0) return;
+    if (gameState.animals.some((a) => isAnimalAirborne(a))) return;
+
     const delay = saveDebounceMs(deviceKind);
     if (delay <= 0) {
       localStorage.setItem("maxim_fermer_save", JSON.stringify(gameState));
@@ -588,7 +675,7 @@ export default function App() {
       localStorage.setItem("maxim_fermer_save", JSON.stringify(gameState));
     }, delay);
     return () => clearTimeout(timer);
-  }, [gameState, deviceKind]);
+  }, [gameState, workersPositions, draggedAnimalId, draggedWorkerId, deviceKind]);
 
   // Real-time ticking engine for crops growth, satiety decay, animal production, day cycles and helper workers
   useEffect(() => {
@@ -783,244 +870,12 @@ export default function App() {
         let statsHarvestedAdd = 0;
         let statsCollectedAdd = 0;
 
-        const isFeedHired = updatedWorkers.find(w => w.id === "worker-mama")?.isActive;
-        const isGrowHired = updatedWorkers.find(w => w.id === "worker-nadya")?.isActive;
-        const isCleanHired = updatedWorkers.find(w => w.id === "worker-lena")?.isActive;
-        const isVetHired = updatedWorkers.find(w => w.id === "worker-pasha")?.isActive;
-        const isBuilderHired = updatedWorkers.find(w => w.id === "worker-papa")?.isActive;
-        const isOrchardHired = updatedWorkers.find(w => w.id === "worker-andrey")?.isActive;
-        const isFisherHired = updatedWorkers.find(w => w.id === "worker-dima")?.isActive;
-        const isClerkHired = updatedWorkers.find(w => w.id === "worker-arina")?.isActive;
-        const isBakerHired = updatedWorkers.find(w => w.id === "worker-sveta")?.isActive;
-        const isShepherdHired = updatedWorkers.find(w => w.id === "worker-misha")?.isActive;
-        const isStargazerHired = updatedWorkers.find(w => w.id === "worker-masha")?.isActive;
-        const isHandymanHired = updatedWorkers.find(w => w.id === "worker-sergey")?.isActive;
-        const isPastuhHired = updatedWorkers.find(w => w.id === "worker-pastuh")?.isActive;
-        const isKolyaHired = updatedWorkers.find(w => w.id === "worker-kolya")?.isActive;
-        const isVeraHired = updatedWorkers.find(w => w.id === "worker-vera")?.isActive;
-        const isFyodorHired = updatedWorkers.find(w => w.id === "worker-fyodor")?.isActive;
-        const isSonyaHired = updatedWorkers.find(w => w.id === "worker-sonya")?.isActive;
-        const isGrishaHired = updatedWorkers.find(w => w.id === "worker-grisha")?.isActive;
-        const isNinaHired = updatedWorkers.find(w => w.id === "worker-nina")?.isActive;
-        const isPetyaHired = updatedWorkers.find(w => w.id === "worker-petya")?.isActive;
-        const isOlyaHired = updatedWorkers.find(w => w.id === "worker-olya")?.isActive;
-        const isVikaHired = updatedWorkers.find(w => w.id === "worker-vika")?.isActive;
-        const isIgorHired = updatedWorkers.find(w => w.id === "worker-igor")?.isActive;
-        const isTolyaHired = updatedWorkers.find(w => w.id === "worker-tolya")?.isActive;
-        const isZoyaHired = updatedWorkers.find(w => w.id === "worker-zoya")?.isActive;
-        const isRomanHired = true; // Роман-домовой всегда с домом
+        // NPC задачи выполняются визуально (workerMovement.ts + decision timer)
+        const isPastuhHired = updatedWorkers.find((w) => w.id === "worker-pastuh")?.isActive;
+        const isRomanHired = true;
 
-        const plantingCropOrder = getPlantingCropOrder(prev.animals || [], updatedInventory);
-        const compostLvl = prev.upgrades["richCompost"] || 0;
-        const feederLvl = prev.upgrades["autoFeeder"] || 1;
-        const autoFeederMultiplier = 1 + (feederLvl - 1) * 0.20;
-        const workerZones = workersPositionsRef.current;
-
-        const applyWorkerFeed = (
-          workerId: string,
-          fallbackZone: LocationId,
-          options?: Parameters<typeof feedOneHungryAnimalInZone>[3]
-        ) => {
-          const zone = getWorkerDutyZone(workerId, workerZones, fallbackZone);
-          const result = feedOneHungryAnimalInZone(
-            updatedAnimals,
-            updatedInventory,
-            zone,
-            { autoFeederMultiplier, ...options }
-          );
-          if (result.fed) {
-            updatedAnimals = result.animals;
-            updatedInventory = result.inventory;
-            statsFedAdd += 1;
-            totalXpEarned += result.xp;
-          }
-        };
-
-        // A. 👩‍🍳 Мама Женя — кормит 1 голодного зверя в своей зоне (ездит по локациям)
-        if (isFeedHired) {
-          applyWorkerFeed("worker-mama", "BARNYARD");
-        }
-
-        // B. 👵🏻 Бабушка Надя — полив, посадка, сбор на огороде
-        if (isGrowHired) {
-          waterOneDryGardenPlot(updatedCrops);
-          const planted = plantOneEmptyGardenPlot(updatedCrops, plantingCropOrder, updatedInventory, nextCoins);
-          if (planted.planted) nextCoins -= planted.coinsSpent;
-          if (harvestOneRipeGardenPlot(updatedCrops, updatedInventory, compostLvl)) {
-            statsHarvestedAdd += 1;
-            totalXpEarned += 10;
-          }
-        }
-
-        // C. 👦🏻 Озорной Вася (CLEANER WORKER) - Brushes, Gathers animal products & Orchard fruits
-        if (isCleanHired) {
-          // C1. Collects 1 ripe animal product
-          let collectCheck = false;
-          updatedAnimals = updatedAnimals.map((animal) => {
-            if (animal.productionProgress >= 100 && !collectCheck && animal.species !== AnimalSpecies.SHEEP) {
-              const config = ANIMAL_TEMPLATES[animal.species];
-              const prodKey = config.productName;
-              updatedInventory[prodKey] = (updatedInventory[prodKey] || 0) + 1;
-              collectCheck = true;
-              statsCollectedAdd += 1;
-              totalXpEarned += 12;
-
-              return {
-                ...animal,
-                productionProgress: 0
-              };
-            }
-            return animal;
-          });
-
-          // C2. Collects 1 Orchard fruit
-          let fruitCheck = false;
-          Object.keys(updatedTrees).forEach((treeId) => {
-            const tree = updatedTrees[treeId];
-            if (tree && tree.fruitCount > 0 && !fruitCheck) {
-              const config = TREES_CONFIG[tree.type];
-              const fruitKey = config.fruitNameRu === "Яблоко" ? "APPLE" : "CHERRY";
-              updatedInventory[fruitKey] = (updatedInventory[fruitKey] || 0) + 1;
-              tree.fruitCount -= 1;
-              fruitCheck = true;
-              statsCollectedAdd += 1;
-              totalXpEarned += 15;
-
-            }
-          });
-
-          // C3. Brushes moved to Дедушка Паша (worker-pasha)
-        }
-
-        // D. 👴🏼 Дедушка Паша (VET) - Brushes 1 dirty or unhappy animal
-        if (isVetHired) {
-          let brushCheck = false;
-          updatedAnimals = updatedAnimals.map((animal) => {
-            if ((animal.cleanliness < 70 || animal.happiness < 75) && !brushCheck) {
-              brushCheck = true;
-
-              return {
-                ...animal,
-                cleanliness: 100,
-                happiness: Math.min(animal.happiness + 20, 100)
-              };
-            }
-            return animal;
-          });
-        }
-
-        // E. 🧔🏽‍♂️ Папа Андрей (BUILDER) - Pets 1 sad animal
-        if (isBuilderHired) {
-          let petCheck = false;
-          updatedAnimals = updatedAnimals.map((animal) => {
-            if (animal.happiness < 85 && !petCheck) {
-              petCheck = true;
-
-              return {
-                ...animal,
-                happiness: Math.min(animal.happiness + 15, 100)
-              };
-            }
-            return animal;
-          });
-        }
-
-        // F. 👴🏽 Дедушка Андрей (ORCHARD) - Speeds up 1 tree fruit growth
-        if (isOrchardHired) {
-          let treeCheck = false;
-          Object.keys(updatedTrees).forEach((treeId) => {
-            const tree = updatedTrees[treeId];
-            if (tree && tree.fruitCount < TREES_CONFIG[tree.type].yieldCount && !treeCheck) {
-              tree.fruitProgress = Math.min(tree.fruitProgress + 12, 100);
-              if (tree.fruitProgress >= 100) {
-                tree.fruitCount = Math.min(tree.fruitCount + 1, TREES_CONFIG[tree.type].yieldCount);
-                tree.fruitProgress = 0;
-              }
-              treeCheck = true;
-
-            }
-          });
-        }
-
-        // G. 🧔🏻‍♂️ Дядя Дима (FISHER) - Catches fish at the pond
-        if (isFisherHired) {
-          nextCoins += 6;
-          totalXpEarned += 4;
-
-        }
-
-        // H. 👩🏻‍💼 Тётя Арина (CLERK) - Organizes inventory for bonus XP
-        if (isClerkHired) {
-          totalXpEarned += 5;
-        }
-
-        // I. 👩🏻 Тётя Светa (BAKER) - Bakes bread from wheat
-        if (isBakerHired && (updatedInventory["WHEAT"] || 0) > 0) {
-          updatedInventory["WHEAT"] = (updatedInventory["WHEAT"] || 1) - 1;
-          nextCoins += 12;
-          totalXpEarned += 6;
-
-        }
-
-        // J. 👦🏻 Кузен Мишa (SHEPHERD) - Shears 1 ready sheep
-        if (isShepherdHired) {
-          let shearCheck = false;
-          updatedAnimals = updatedAnimals.map((animal) => {
-            if (
-              !shearCheck &&
-              animal.species === AnimalSpecies.SHEEP &&
-              animal.productionProgress >= 100 &&
-              !animal.isSheared
-            ) {
-              shearCheck = true;
-              const config = ANIMAL_TEMPLATES[animal.species];
-              updatedInventory[config.productName] = (updatedInventory[config.productName] || 0) + 1;
-              statsCollectedAdd += 1;
-              totalXpEarned += 12;
-
-              return {
-                ...animal,
-                productionProgress: 0,
-                isSheared: true,
-                regrowWoolTimeRemaining: 30,
-                happiness: Math.max(animal.happiness - 5, 40)
-              };
-            }
-            return animal;
-          });
-        }
-
-        // K. 👵🏽 Бабушка Маша (STARGAZER) - Finds stars at night
-        if (isStargazerHired && currentDayProgress >= 192) {
-          nextCoins += 8;
-          totalXpEarned += 8;
-
-        }
-
-        // L. 🧑🏻‍🔧 Дядя Сергей (HANDYMAN) - Helps orchard + cheers animals
-        if (isHandymanHired) {
-          let handymanTreeCheck = false;
-          Object.keys(updatedTrees).forEach((treeId) => {
-            const tree = updatedTrees[treeId];
-            if (tree && tree.fruitCount < TREES_CONFIG[tree.type].yieldCount && !handymanTreeCheck) {
-              tree.fruitProgress = Math.min(tree.fruitProgress + 8, 100);
-              handymanTreeCheck = true;
-
-            }
-          });
-          let cheerCheck = false;
-          updatedAnimals = updatedAnimals.map((animal) => {
-            if (animal.happiness < 90 && !cheerCheck) {
-              cheerCheck = true;
-              return { ...animal, happiness: Math.min(animal.happiness + 8, 100) };
-            }
-            return animal;
-          });
-        }
-
-        // M. 🤠 Пастух Ваня — загоняет зверушек и подкармливает голодных в своей зоне
+        // M. 🤠 Пастух Ваня — загоняет зверушек в загоны (кормление — визуально)
         if (isPastuhHired) {
-          applyWorkerFeed("worker-pastuh", "MEADOW", { happinessBoost: 12, xpReward: 6 });
           const pensList = prev.pens || [];
           updatedAnimals = updatedAnimals.map((animal) => {
             if (!animal.penId) return animal;
@@ -1030,185 +885,6 @@ export default function App() {
             if (!tpl || isAnimalInsidePen(animal, tpl)) return animal;
 
             return herdAnimalTowardPen(animal, tpl);
-          });
-        }
-
-        // N. 👦 Коля — полив
-        if (isKolyaHired) {
-          waterOneDryGardenPlot(updatedCrops);
-        }
-
-        // Q. 💧 Тётя Вера — полив
-        if (isVeraHired) {
-          waterOneDryGardenPlot(updatedCrops);
-        }
-
-        // R. 🌱 Дед Фёдор — посадка
-        if (isFyodorHired) {
-          const fyodorPlant = plantOneEmptyGardenPlot(updatedCrops, plantingCropOrder, updatedInventory, nextCoins);
-          if (fyodorPlant.planted) nextCoins -= fyodorPlant.coinsSpent;
-        }
-
-        // S. 🌾 Сонечка — сбор урожая
-        if (isSonyaHired) {
-          if (harvestOneRipeGardenPlot(updatedCrops, updatedInventory, compostLvl)) {
-            statsHarvestedAdd += 1;
-            totalXpEarned += 10;
-          }
-        }
-
-        // T. 🪴 Гришка — полив
-        if (isGrishaHired) {
-          waterOneDryGardenPlot(updatedCrops);
-        }
-
-        // O. 👩‍🌾 Тётя Нина — кормит птиц и собирает яйца в своей зоне
-        if (isNinaHired) {
-          applyWorkerFeed("worker-nina", "MEADOW", {
-            speciesFilter: POULTRY_SPECIES,
-            happinessBoost: 15,
-            xpReward: 7,
-          });
-          let ninaCheck = false;
-          updatedAnimals = updatedAnimals.map((animal) => {
-            if (
-              !ninaCheck &&
-              animal.productionProgress >= 100 &&
-              POULTRY_SPECIES.includes(animal.species)
-            ) {
-              const config = ANIMAL_TEMPLATES[animal.species];
-              updatedInventory[config.productName] = (updatedInventory[config.productName] || 0) + 1;
-              ninaCheck = true;
-              statsCollectedAdd += 1;
-              totalXpEarned += 10;
-
-              return { ...animal, productionProgress: 0 };
-            }
-            return animal;
-          });
-        }
-
-        // O2. 👦 Петя — второй птичник, кормит птиц в своей зоне
-        if (isPetyaHired) {
-          applyWorkerFeed("worker-petya", "BARNYARD", {
-            speciesFilter: POULTRY_SPECIES,
-            happinessBoost: 12,
-            xpReward: 6,
-          });
-        }
-
-        // P. 🐰 Оля — кормит кроликов в своей зоне
-        if (isOlyaHired) {
-          applyWorkerFeed("worker-olya", "MEADOW", {
-            speciesFilter: [AnimalSpecies.RABBIT],
-            happinessBoost: 15,
-            xpReward: 7,
-          });
-          let olyaCollect = false;
-          updatedAnimals = updatedAnimals.map((animal) => {
-            if (!olyaCollect && animal.species === AnimalSpecies.RABBIT && animal.productionProgress >= 100) {
-              const config = ANIMAL_TEMPLATES[animal.species];
-              updatedInventory[config.productName] = (updatedInventory[config.productName] || 0) + 1;
-              olyaCollect = true;
-              statsCollectedAdd += 1;
-              totalXpEarned += 10;
-
-              return { ...animal, productionProgress: 0 };
-            }
-            return animal;
-          });
-        }
-
-        // Q. 🐷 Вика — кормит свинок, собирает и чистит в своей зоне
-        if (isVikaHired) {
-          applyWorkerFeed("worker-vika", "MEADOW", {
-            speciesFilter: [AnimalSpecies.PIG],
-            happinessBoost: 14,
-            xpReward: 7,
-          });
-          let vikaCollect = false;
-          updatedAnimals = updatedAnimals.map((animal) => {
-            if (!vikaCollect && animal.species === AnimalSpecies.PIG && animal.productionProgress >= 100) {
-              const config = ANIMAL_TEMPLATES[animal.species];
-              updatedInventory[config.productName] = (updatedInventory[config.productName] || 0) + 1;
-              vikaCollect = true;
-              statsCollectedAdd += 1;
-              totalXpEarned += 11;
-
-              return { ...animal, productionProgress: 0 };
-            }
-            if (!vikaCollect && animal.species === AnimalSpecies.PIG && animal.cleanliness < 75) {
-              vikaCollect = true;
-
-              return { ...animal, cleanliness: 100, happiness: Math.min(animal.happiness + 10, 100) };
-            }
-            return animal;
-          });
-        }
-
-        // R. 🐪 Игорь — собирает у пустынных зверей + монетки
-        if (isIgorHired) {
-          let igorCheck = false;
-          updatedAnimals = updatedAnimals.map((animal) => {
-            if (
-              !igorCheck &&
-              animal.productionProgress >= 100 &&
-              [AnimalSpecies.FENNEC, AnimalSpecies.CAMEL].includes(animal.species)
-            ) {
-              const config = ANIMAL_TEMPLATES[animal.species];
-              updatedInventory[config.productName] = (updatedInventory[config.productName] || 0) + 1;
-              igorCheck = true;
-              statsCollectedAdd += 1;
-              totalXpEarned += 12;
-
-              return { ...animal, productionProgress: 0 };
-            }
-            return animal;
-          });
-          nextCoins += 3;
-          totalXpEarned += 2;
-        }
-
-        // S. 🦕 Толя — гладит динозавров
-        if (isTolyaHired) {
-          let tolyaCheck = false;
-          updatedAnimals = updatedAnimals.map((animal) => {
-            if (
-              !tolyaCheck &&
-              animal.happiness < 88 &&
-              [AnimalSpecies.T_REX, AnimalSpecies.TRICERATOPS, AnimalSpecies.PTERODACTYL, AnimalSpecies.DIPLODOCUS].includes(animal.species)
-            ) {
-              tolyaCheck = true;
-
-              return { ...animal, happiness: Math.min(animal.happiness + 18, 100) };
-            }
-            return animal;
-          });
-        }
-
-        // T. 🦢 Зоя — кормит водоплавающих и собирает перья в своей зоне
-        if (isZoyaHired) {
-          applyWorkerFeed("worker-zoya", "LAKE", {
-            speciesFilter: WATER_BIRD_SPECIES,
-            happinessBoost: 15,
-            xpReward: 7,
-          });
-          let zoyaCheck = false;
-          updatedAnimals = updatedAnimals.map((animal) => {
-            if (
-              !zoyaCheck &&
-              animal.productionProgress >= 100 &&
-              [AnimalSpecies.SWAN, AnimalSpecies.GOOSE, AnimalSpecies.DUCK].includes(animal.species)
-            ) {
-              const config = ANIMAL_TEMPLATES[animal.species];
-              updatedInventory[config.productName] = (updatedInventory[config.productName] || 0) + 1;
-              zoyaCheck = true;
-              statsCollectedAdd += 1;
-              totalXpEarned += 11;
-
-              return { ...animal, productionProgress: 0 };
-            }
-            return animal;
           });
         }
 
@@ -1230,17 +906,18 @@ export default function App() {
         // --- 5. Animal wandering (day only; at night they stay in place and sleep) ---
         const isNightVal = currentDayProgress >= 192;
         if (!isNightVal) {
+          const groundedAnimals = updatedAnimals.filter((a) => !isAnimalAirborne(a));
           const shouldShift = Math.random() < 0.22;
-          if (shouldShift && updatedAnimals.length > 0) {
-            const randomIndex = Math.floor(Math.random() * updatedAnimals.length);
-            updatedAnimals[randomIndex] = wanderAnimalAvoidingOthers(
-              updatedAnimals[randomIndex],
-              updatedAnimals
-            );
+          if (shouldShift && groundedAnimals.length > 0) {
+            const pick = groundedAnimals[Math.floor(Math.random() * groundedAnimals.length)];
+            const idx = updatedAnimals.findIndex((a) => a.id === pick.id);
+            if (idx >= 0) {
+              updatedAnimals[idx] = wanderAnimalAvoidingOthers(pick, updatedAnimals);
+            }
           }
         }
 
-        updatedAnimals = separateAnimalsByLocation(updatedAnimals);
+        updatedAnimals = separateAnimalsByLocationSkipAirborne(updatedAnimals);
         updatedAnimals = applyPenConstraints(updatedAnimals, prev.pens || []);
 
         let updatedState = {
@@ -1308,6 +985,9 @@ export default function App() {
   const draggedDistanceRef = useRef(0);
   const lastDragCoordsRef = useRef<{ x: number, y: number, t: number }[]>([]);
   const justFinishedDraggingRef = useRef<boolean>(false);
+  const dragAnimalLiveRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
+  const dragWorkerLiveRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
+  const dragDomRafRef = useRef(0);
 
   // Advanced Long-Press/Drag-to-Toss tracking refs:
   const animalPressTimerRef = useRef<any>(null);
@@ -1435,7 +1115,33 @@ export default function App() {
     applyBoyVisuals(boyPositionRef.current);
   }, [effectiveZoom, activeZone, deviceKind, isMobileCamera]);
 
-  // Подбрасывание — RAF только пока что-то летит или тащат (без вечного цикла)
+  // Drag: позицию двигаем напрямую в DOM (left%/top%), React не ререндерим
+  const flushDragDom = () => {
+    dragDomRafRef.current = 0;
+
+    const aid = draggedAnimalIdRef.current;
+    if (aid && dragAnimalLiveRef.current) {
+      const live = dragAnimalLiveRef.current;
+      setDragRoamerPosition(`roamer-${aid}`, live.x, live.y);
+    }
+
+    const wid = draggedWorkerIdRef.current;
+    if (wid && dragWorkerLiveRef.current) {
+      const live = dragWorkerLiveRef.current;
+      setDragRoamerPosition(`worker-roamer-${wid}`, live.x, live.y);
+    }
+  };
+
+  const scheduleDragDomFlush = () => {
+    if (!dragDomRafRef.current) {
+      dragDomRafRef.current = requestAnimationFrame(flushDragDom);
+    }
+  };
+
+  // ЕДИНЫЙ ДВИЖОК ДВИЖЕНИЯ (RAF):
+  // toss животных + toss работников + плавная ходьба работников.
+  // Источник правды во время движения — live-refs (НЕ перетираются ререндером).
+  // React-state обновляется редко (throttle) — только для отсечения/сохранения.
   useEffect(() => {
     let raf = 0;
     let last = performance.now();
@@ -1443,29 +1149,20 @@ export default function App() {
     let lastWorkerSync = 0;
     let loopActive = false;
     const spinAnimals = shouldSpinTossedSprites(deviceKind);
-    let liveAnimals = gameStateRef.current.animals;
-    let liveWorkers = workersPositionsRef.current;
 
     const syncAnimals = (animals: AnimalInstance[], force = false) => {
       const now = performance.now();
-      if (!force && now - lastAnimalSync < 160) return;
+      if (!force && now - lastAnimalSync < 150) return;
       lastAnimalSync = now;
-      startTransition(() => {
-        setGameState((prev) => ({ ...prev, animals }));
-      });
+      setGameState((prev) => ({ ...prev, animals }));
     };
 
-    const syncWorkers = (
-      next: typeof workersPositionsRef.current,
-      force = false
-    ) => {
+    const syncWorkers = (next: typeof workersPositionsRef.current, force = false) => {
       const now = performance.now();
-      if (!force && now - lastWorkerSync < 160) return;
+      if (!force && now - lastWorkerSync < 150) return;
       lastWorkerSync = now;
-      liveWorkers = next;
-      startTransition(() => {
-        setWorkersPositions(next);
-      });
+      workersPositionsRef.current = next;
+      setWorkersPositions(next);
     };
 
     const stopLoop = () => {
@@ -1482,111 +1179,220 @@ export default function App() {
     };
 
     const tick = (now: number) => {
-      const dt = Math.min(32, now - last);
+      const rawDt = now - last;
+      const dt = Math.min(32, Math.max(8, rawDt));
       last = now;
 
       const draggedAnimal = draggedAnimalIdRef.current;
       const draggedWorker = draggedWorkerIdRef.current;
+      const zone = activeZoneRef.current;
+      // Перетаскивание двигается своим RAF (flushDragDom); здесь — только toss/ходьба
+      let busy = false;
 
-      liveAnimals = gameStateRef.current.animals;
+      // ---------- ЖИВОТНЫЕ (только подбрасывание) ----------
+      const aLive = animalLiveRef.current;
+      const animals = gameStateRef.current.animals;
+      const hasAirborneAnimal =
+        aLive.size > 0 ||
+        animals.some((a) => a.id !== draggedAnimal && isAnimalAirborne(a));
 
-      if (!needsTossSimulation(liveAnimals, liveWorkers, draggedAnimal, draggedWorker)) {
-        stopLoop();
-        return;
-      }
-
-      liveAnimals = liveAnimals.map((refA) => {
-        const live = liveAnimals.find((a) => a.id === refA.id);
-        if (!live || !isAnimalAirborne(refA)) return refA;
-        if (isAnimalAirborne(live) && (live.vx || live.vy)) return live;
-        return refA;
-      });
-
-      let animalsChanged = false;
-      let anyAnimalToss = false;
-      const nextAnimals = liveAnimals.map((animal) => {
-        if (animal.id === draggedAnimal) return animal;
-        const { next, active } = stepToss(animalToKinematics(animal), dt, spinAnimals);
-        if (!active && !isAnimalAirborne(animal)) return animal;
-        if (
-          next.x === animal.x &&
-          next.y === animal.y &&
-          next.vx === (animal.vx ?? 0) &&
-          next.vy === (animal.vy ?? 0) &&
-          next.angle === (animal.angle ?? 0)
-        ) {
-          return animal;
+      if (hasAirborneAnimal) {
+        let animalsDirty = false;
+        const nextAnimals = animals.map((animal) => {
+          if (animal.id === draggedAnimal) return animal;
+          const k = aLive.get(animal.id);
+          if (!k && !isAnimalAirborne(animal)) return animal;
+          const kin = {
+            x: k ? k.x : animal.x,
+            y: k ? k.y : animal.y,
+            vx: k ? k.vx : animal.vx ?? 0,
+            vy: k ? k.vy : animal.vy ?? 0,
+            angle: k ? k.angle : animal.angle ?? 0,
+            groundY: resolveGroundY({ ...animal, y: k ? k.y : animal.y }),
+          };
+          const { next, active } = stepToss(kin, dt, spinAnimals);
+          placeAnimalDom(animal.id, next.x, next.y, next.angle, animal.scaleX, active);
+          animalsDirty = true;
+          if (active) {
+            aLive.set(animal.id, {
+              x: next.x,
+              y: next.y,
+              angle: next.angle,
+              vx: next.vx,
+              vy: next.vy,
+            });
+            busy = true;
+          } else {
+            aLive.delete(animal.id);
+          }
+          return applyKinematicsToAnimal(animal, next);
+        });
+        if (animalsDirty) {
+          gameStateRef.current = { ...gameStateRef.current, animals: nextAnimals };
+          syncAnimals(nextAnimals, !busy);
         }
-        animalsChanged = true;
-        if (active) anyAnimalToss = true;
-        const updated = applyKinematicsToAnimal(animal, next);
-        applyAnimalTossDom(updated);
-        return updated;
-      });
-
-      if (animalsChanged) {
-        liveAnimals = nextAnimals;
-        gameStateRef.current = { ...gameStateRef.current, animals: nextAnimals };
-        syncAnimals(nextAnimals, !anyAnimalToss);
       }
 
-      liveWorkers = { ...workersPositionsRef.current, ...liveWorkers };
+      // ---------- РАБОТНИКИ (подбрасывание + ходьба) ----------
+      const wLive = workerLiveRef.current;
+      const workers = workersPositionsRef.current;
+      let workersDirty = false;
+      const nextWorkers = { ...workers };
 
-      let workersChanged = false;
-      let anyWorkerToss = false;
-      const nextWorkers = { ...liveWorkers };
       for (const wid of Object.keys(nextWorkers)) {
-        const w = nextWorkers[wid];
-        const workerInst = workersRef.current?.find((gw) => gw.id === wid);
-        if (!workerInst?.isActive || w.currentZone !== activeZoneRef.current) continue;
         if (wid === draggedWorker) continue;
+        const ws = nextWorkers[wid];
+        const inst = workersRef.current?.find((gw) => gw.id === wid);
+        if (!inst?.isActive) continue;
 
-        const { next: k, active } = stepToss(
-          {
-            x: w.x,
-            y: w.y,
-            vx: w.vx ?? 0,
-            vy: w.vy ?? 0,
-            angle: w.angle ?? 0,
-            groundY: resolveWorkerGroundY(w),
-          },
-          dt,
-          false
-        );
-        if (!active && !(w.vx || w.vy || w.angle)) continue;
-        if (
-          k.x === w.x &&
-          k.y === w.y &&
-          k.vx === (w.vx ?? 0) &&
-          k.vy === (w.vy ?? 0) &&
-          k.angle === (w.angle ?? 0)
-        ) {
-          continue;
+        const isVisible = ws.currentZone === zone;
+
+        let L = wLive.get(wid);
+        const stateAirborne = workerAirborne(ws);
+        const enRoute = workerNeedsMovement(ws, L?.x ?? ws.x, L?.y ?? ws.y);
+
+        if (!L) {
+          if (!stateAirborne && !enRoute) continue;
+          L = {
+            x: ws.x,
+            y: ws.y,
+            vx: ws.vx ?? 0,
+            vy: ws.vy ?? 0,
+            angle: ws.angle ?? 0,
+            groundY: resolveWorkerGroundY(ws),
+            dir: ws.dir,
+            moving: enRoute,
+          };
+          wLive.set(wid, L);
         }
 
-        workersChanged = true;
-        if (active) anyWorkerToss = true;
-        nextWorkers[wid] = {
-          ...w,
-          x: k.x,
-          y: k.y,
-          vx: k.vx,
-          vy: k.vy,
-          angle: k.angle,
-          groundY: k.groundY,
-          isMoving: false,
-          targetX: k.x,
-          targetY: k.y,
-        };
-        applyWorkerTossDom(wid, k.x, k.y, k.angle, w.dir);
+        const tossing = workerAirborne({
+          x: L.x,
+          y: L.y,
+          vx: L.vx,
+          vy: L.vy,
+          angle: L.angle,
+          groundY: L.groundY,
+          targetY: ws.targetY,
+        });
+
+        const walkSpeed = WORKER_TRAVEL_WALK_SPEED;
+
+        if (tossing) {
+          const { next: k, active } = stepToss(
+            { x: L.x, y: L.y, vx: L.vx, vy: L.vy, angle: L.angle, groundY: L.groundY },
+            dt,
+            false
+          );
+          L.x = k.x;
+          L.y = k.y;
+          L.vx = active ? k.vx : 0;
+          L.vy = active ? k.vy : 0;
+          L.angle = active ? k.angle : 0;
+          L.groundY = k.groundY;
+          L.moving = false;
+          if (isVisible) placeWorkerDom(wid, k.x, k.y, L.angle, L.dir, false, active);
+          nextWorkers[wid] = {
+            ...ws,
+            x: k.x,
+            y: k.y,
+            vx: active ? k.vx : 0,
+            vy: active ? k.vy : 0,
+            angle: active ? k.angle : 0,
+            groundY: k.groundY,
+            isMoving: false,
+            targetX: k.x,
+            targetY: k.y,
+          };
+          workersDirty = true;
+          if (active) busy = true;
+          else wLive.delete(wid);
+        } else if (enRoute) {
+          const step = stepWalk(
+            L.x,
+            L.y,
+            ws.targetX,
+            ws.targetY,
+            dt,
+            L.dir,
+            walkSpeed,
+            WORKER_ARRIVE_DIST
+          );
+
+          L.x = step.x;
+          L.y = step.y;
+          L.dir = step.dir;
+          L.angle = 0;
+          L.vx = 0;
+          L.vy = 0;
+          L.moving = step.moving;
+
+          let nextWs: WorkerPositionState = {
+            ...ws,
+            x: step.x,
+            y: step.y,
+            dir: step.dir,
+            isMoving: step.moving,
+            angle: 0,
+            vx: 0,
+            vy: 0,
+          };
+
+          if (step.arrived && ws.travelPhase === "exitWalk" && ws.travelTo) {
+            nextWs = completeZoneExit(nextWs);
+            L.x = nextWs.x;
+            L.y = nextWs.y;
+            L.dir = nextWs.dir;
+            L.moving = true;
+            workersDirty = true;
+            if (isVisible) {
+              placeWorkerDom(wid, nextWs.x, nextWs.y, 0, nextWs.dir, true, false);
+            }
+            nextWorkers[wid] = nextWs;
+            busy = true;
+            continue;
+          }
+
+          if (isVisible) {
+            placeWorkerDom(wid, step.x, step.y, 0, step.dir, step.moving, true);
+          }
+          nextWorkers[wid] = nextWs;
+          workersDirty = true;
+          busy = true;
+        } else if (L.moving) {
+          L.moving = false;
+          if (isVisible) placeWorkerDom(wid, L.x, L.y, 0, L.dir, false, false);
+        }
       }
 
-      if (workersChanged) {
-        liveWorkers = nextWorkers;
-        syncWorkers(nextWorkers, !anyWorkerToss);
+      if (workersDirty) {
+        workersPositionsRef.current = nextWorkers;
+        const syncNow = performance.now();
+        if (!busy || syncNow - lastWorkerSync >= 80) {
+          lastWorkerSync = syncNow;
+          setWorkersPositions(nextWorkers);
+        }
       }
 
-      raf = requestAnimationFrame(tick);
+      let stillMoving = false;
+      const anyActiveWorker = (workersRef.current ?? []).some(
+        (w) => w.isActive && !w.isBundledWithHome
+      );
+      for (const wid of Object.keys(nextWorkers)) {
+        if (wid === draggedWorker) continue;
+        const ws = nextWorkers[wid];
+        const inst = workersRef.current?.find((gw) => gw.id === wid);
+        if (!inst?.isActive) continue;
+        const live = wLive.get(wid);
+        if (workerNeedsMovement(ws, live?.x, live?.y)) stillMoving = true;
+      }
+
+      if (anyActiveWorker || busy || stillMoving) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        stopLoop();
+      }
+      return;
     };
 
     tossWakeRef.current = wakeLoop;
@@ -1598,21 +1404,56 @@ export default function App() {
     };
   }, [deviceKind]);
 
+  // Гарантия: после КАЖДОГО ререндера возвращаем живые позиции в DOM,
+  // чтобы React не «дёргал» движущиеся спрайты своим left/top из state.
+  useLayoutEffect(() => {
+    const zone = activeZoneRef.current;
+    const da = draggedAnimalIdRef.current;
+    const dw = draggedWorkerIdRef.current;
+
+    for (const a of gameStateRef.current.animals) {
+      if ((a.locationId || "MEADOW") !== zone) continue;
+      if (a.id === da) continue;
+      const live = animalLiveRef.current.get(a.id);
+      if (live) {
+        placeAnimalDom(a.id, live.x, live.y, live.angle, a.scaleX, true);
+      } else {
+        placeAnimalDom(a.id, a.x, a.y, a.angle ?? 0, a.scaleX, false);
+      }
+    }
+
+    const workers = workersPositionsRef.current;
+    for (const wid of Object.keys(workers)) {
+      if (wid === dw) continue;
+      const ws = workers[wid];
+      const inst = workersRef.current?.find((w) => w.id === wid);
+      if (!inst?.isActive || ws.currentZone !== zone) continue;
+      const live = workerLiveRef.current.get(wid);
+      if (live) {
+        const airborne = live.vx !== 0 || live.vy !== 0;
+        placeWorkerDom(wid, live.x, live.y, live.angle, live.dir, live.moving, airborne);
+      } else if (!workerNeedsMovement(ws)) {
+        placeWorkerDom(wid, ws.x, ws.y, ws.angle ?? 0, ws.dir, false, false);
+      }
+    }
+  });
+
   useEffect(() => {
     if (draggedAnimalId || draggedWorkerId) {
       tossWakeRef.current();
     }
   }, [draggedAnimalId, draggedWorkerId]);
 
-  // Ходьба работников + раздвижение стоящих животных (редкий тик, без подбрасывания)
+  // «Решения» работников: куда идти, переход между зонами, таймеры действий.
+  // Покадровое движение делает единый RAF-движок (никакой интерполяции здесь).
   useEffect(() => {
-    const walkMs = physicsLoopMs(deviceKind);
+    const decisionMs = isPhone ? 450 : 320;
     const walkTimer = setInterval(() => {
       if (!draggedAnimalIdRef.current) {
         animalSpacingTickRef.current += 1;
-        if (animalSpacingTickRef.current % (isPhone ? 32 : 16) === 0) {
+        if (animalSpacingTickRef.current % 6 === 0) {
           setGameState((prev) => {
-            const separated = separateAnimalsByLocation(prev.animals);
+            const separated = separateAnimalsByLocationSkipAirborne(prev.animals);
             const moved = separated.some((a, i) => a.x !== prev.animals[i].x || a.y !== prev.animals[i].y);
             return moved ? { ...prev, animals: separated } : prev;
           });
@@ -1620,152 +1461,276 @@ export default function App() {
       }
 
       workerZoneTickRef.current += 1;
-      if (workerZoneTickRef.current % (isPhone ? 220 : 100) === 0) {
-        const gs = gameStateRef.current;
-        setWorkersPositions((prev) => {
-          let changed = false;
-          const next = { ...prev };
-          (gs.workers ?? []).forEach((worker) => {
-            if (!worker.isActive || worker.isBundledWithHome) return;
-            const pos = next[worker.id];
-            if (!pos) return;
-            const home = worker.assignedLocationId || "MEADOW";
-            const dutyZone = pickWorkerTravelZone(
-              worker.id,
-              gs.animals || [],
-              gs.inventory || {},
-              home
-            );
-            if (dutyZone !== pos.currentZone) {
-              const spot = randomSpotInZone(dutyZone);
-              next[worker.id] = {
-                ...pos,
-                currentZone: dutyZone,
-                x: spot.x,
-                y: spot.y,
-                targetX: spot.x,
-                targetY: spot.y,
-                isMoving: false,
-                actionLabel: dutyZone !== home ? (ZONE_TRAVEL_LABEL[dutyZone] || "На дело!") : undefined,
-                actionTimer: dutyZone !== home ? 2200 : 0,
-              };
-              changed = true;
-            }
-          });
-          return changed ? next : prev;
+      const gs = gameStateRef.current;
+      const pendingTaskResults: Array<{ wid: string; workLabel: string }> = [];
+      const next = { ...workersPositionsRef.current };
+      let updated = false;
+
+      if (workerZoneTickRef.current % (isPhone ? 30 : 20) === 0) {
+        (gs.workers ?? []).forEach((worker) => {
+          if (!worker.isActive || worker.isBundledWithHome) return;
+          const pos = next[worker.id];
+          if (!pos) return;
+          const home = worker.assignedLocationId || "MEADOW";
+          const dutyZone = pickWorkerTravelZone(
+            worker.id,
+            gs.animals || [],
+            gs.inventory || {},
+            home
+          );
+          if (dutyZone !== pos.currentZone && canStartZoneTravel(pos)) {
+            const synced = patchWorkerFromLive(worker.id, pos);
+            next[worker.id] = beginZoneTravel(synced, dutyZone);
+            updated = true;
+          }
         });
       }
 
-      setWorkersPositions((prev) => {
-        const next = { ...prev };
-        let updated = false;
+      Object.keys(next).forEach((wid) => {
+        let w = patchWorkerFromLive(wid, next[wid]);
+        const workerInst = workersRef.current?.find((gw) => gw.id === wid);
+        if (!workerInst?.isActive) return;
+        if (wid === draggedWorkerIdRef.current) return;
+        if (w.vy || w.vx || (w.angle ?? 0) !== 0) return;
 
-        Object.keys(next).forEach((wid) => {
-          const w = next[wid];
-          const workerInst = workersRef.current?.find((gw) => gw.id === wid);
-          if (!workerInst?.isActive) return;
-          if (w.currentZone !== activeZoneRef.current) return;
-          if (wid === draggedWorkerIdRef.current) return;
-          if (w.vy || w.vx || (w.angle ?? 0) !== 0) return;
+        let currentActionTimer = w.actionTimer;
+        let currentActionLabel = w.actionLabel;
+        let travelPhase = w.travelPhase ?? "idle";
 
-          let currentActionTimer = w.actionTimer;
-          let currentActionLabel = w.actionLabel;
-          if (currentActionTimer > 0) {
-            currentActionTimer -= walkMs;
-            if (currentActionTimer <= 0) {
-              currentActionTimer = 0;
-              currentActionLabel = undefined;
-            }
+        if (currentActionTimer > 0) {
+          currentActionTimer -= decisionMs;
+          if (currentActionTimer <= 0) {
+            currentActionTimer = 0;
+            currentActionLabel = undefined;
+            if (travelPhase === "working") travelPhase = "idle";
           }
+        }
 
-          const dx = w.targetX - w.x;
-          const dy = w.targetY - w.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
+        const live = workerLiveRef.current.get(wid);
+        const curX = live ? live.x : w.x;
+        const curY = live ? live.y : w.y;
 
-          let newX = w.x;
-          let newY = w.y;
-          let isMoving = w.isMoving;
-          let dir = w.dir;
-          let targetX = w.targetX;
-          let targetY = w.targetY;
+        // Пока идём — не меняем цель (иначе дёргается)
+        if (workerNeedsMovement(w, curX, curY)) {
+          if (
+            w.x !== next[wid]?.x ||
+            w.y !== next[wid]?.y ||
+            currentActionTimer !== w.actionTimer ||
+            currentActionLabel !== w.actionLabel
+          ) {
+            next[wid] = { ...w, actionTimer: currentActionTimer, actionLabel: currentActionLabel };
+            updated = true;
+          }
+          return;
+        }
 
-          if (dist < 0.8) {
-            isMoving = false;
-            newX = w.targetX;
-            newY = w.targetY;
+        const dist = Math.hypot(w.targetX - curX, w.targetY - curY);
 
-            const shouldPickNewTarget = Math.random() < 0.015;
-            if (shouldPickNewTarget && currentActionTimer === 0) {
+        let targetX = w.targetX;
+        let targetY = w.targetY;
+        let isMoving = false;
+        let taskAnimalId = w.taskAnimalId;
+        let taskPlotId = w.taskPlotId;
+        let taskTreeId = w.taskTreeId;
+        let pendingWorkLabel = w.pendingWorkLabel;
+        let changed = false;
+
+        if (travelPhase === "entryWalk" && dist < 1.2) {
+          travelPhase = "idle";
+          currentActionLabel = undefined;
+          changed = true;
+        }
+
+        if (
+          travelPhase === "toTask" &&
+          !workerNeedsMovement(w, curX, curY) &&
+          currentActionTimer === 0
+        ) {
+          const taskResult = performWorkerTask(wid, gs, {
+            animalId: w.taskAnimalId,
+            plotId: w.taskPlotId,
+            treeId: w.taskTreeId,
+          });
+          if (taskResult.didWork) {
+            setGameState((prevState) => {
+              let nextState = { ...prevState };
+              if (taskResult.animals) nextState = { ...nextState, animals: taskResult.animals! };
+              if (taskResult.inventory) nextState = { ...nextState, inventory: taskResult.inventory! };
+              if (taskResult.crops) nextState = { ...nextState, crops: taskResult.crops! };
+              if (taskResult.trees) nextState = { ...nextState, trees: taskResult.trees! };
+              if (taskResult.coins !== undefined) nextState = { ...nextState, coins: taskResult.coins };
+              if (taskResult.xp) {
+                nextState = awardExperience(taskResult.xp, nextState);
+                if (taskResult.fed) {
+                  nextState = {
+                    ...nextState,
+                    stats: { ...nextState.stats, animalsFed: nextState.stats.animalsFed + 1 },
+                  };
+                }
+              }
+              return nextState;
+            });
+            pendingTaskResults.push({
+              wid,
+              workLabel: w.pendingWorkLabel || "✅ Готово!",
+            });
+            travelPhase = "working";
+            currentActionTimer = 2800;
+            currentActionLabel = w.pendingWorkLabel || "✅ Готово!";
+          } else {
+            travelPhase = "idle";
+            currentActionLabel = undefined;
+          }
+          targetX = curX;
+          targetY = curY;
+          taskAnimalId = undefined;
+          taskPlotId = undefined;
+          taskTreeId = undefined;
+          pendingWorkLabel = undefined;
+          changed = true;
+        }
+
+        if (travelPhase === "idle" && currentActionTimer === 0 && dist < 1.2) {
+          const home = workerInst.assignedLocationId || "MEADOW";
+          const dutyZone = pickWorkerTravelZone(
+            wid,
+            gs.animals || [],
+            gs.inventory || {},
+            home
+          );
+          if (w.currentZone === dutyZone) {
+            const task = findWorkerTaskTarget(wid, gs, dutyZone);
+            if (task) {
+              travelPhase = "toTask";
+              targetX = task.x;
+              targetY = task.y;
+              taskAnimalId = task.animalId;
+              taskPlotId = task.plotId;
+              taskTreeId = task.treeId;
+              currentActionLabel = task.approachLabel;
+              pendingWorkLabel = task.workLabel;
               isMoving = true;
-              if (wid === "worker-papa" || wid === "worker-pasha" || wid === "worker-sergey") {
-                targetX = 20 + Math.random() * 50;
-                targetY = 60 + Math.random() * 20;
-              } else if (wid === "worker-mama" || wid === "worker-lena" || wid === "worker-sveta") {
-                targetX = 15 + Math.random() * 65;
-                targetY = 62 + Math.random() * 18;
-              } else if (wid === "worker-andrey" || wid === "worker-misha") {
-                targetX = 15 + Math.random() * 70;
-                targetY = 56 + Math.random() * 24;
-              } else if (wid === "worker-dima") {
-                targetX = LAKESIDE_POND.dockX - 6 + Math.random() * 12;
-                targetY = LAKESIDE_POND.dockY - 3 + Math.random() * 5;
-              } else if (wid === "worker-pastuh" || wid === "worker-nina" || wid === "worker-petya" || wid === "worker-olya") {
-                targetX = 15 + Math.random() * 55;
-                targetY = 64 + Math.random() * 16;
-              } else if (
-                wid === "worker-kolya" || wid === "worker-nadya" || wid === "worker-vera" ||
-                wid === "worker-fyodor" || wid === "worker-sonya" || wid === "worker-grisha"
-              ) {
-                targetX = 18 + Math.random() * 64;
-                targetY = 54 + Math.random() * 18;
-              } else if (wid === "worker-roman") {
-                targetX = 25 + Math.random() * 50;
-                targetY = 58 + Math.random() * 18;
-              } else if (wid === "worker-vika") {
-                targetX = 20 + Math.random() * 60;
-                targetY = 66 + Math.random() * 14;
-              } else if (wid === "worker-igor" || wid === "worker-tolya") {
-                targetX = 18 + Math.random() * 64;
-                targetY = 60 + Math.random() * 20;
-              } else if (wid === "worker-zoya") {
-                targetX = 22 + Math.random() * 56;
-                targetY = 68 + Math.random() * 14;
-              } else if (wid === "worker-arina" || wid === "worker-masha") {
-                targetX = 20 + Math.random() * 60;
-                targetY = 65 + Math.random() * 18;
-              } else {
-                targetX = 20 + Math.random() * 60;
-                targetY = 60 + Math.random() * 20;
+              changed = true;
+            } else {
+              const wander = randomWanderTarget(wid, w.currentZone);
+              if (Math.hypot(wander.x - curX, wander.y - curY) > 2) {
+                targetX = wander.x;
+                targetY = wander.y;
+                isMoving = true;
+                changed = true;
               }
             }
-          } else {
-            isMoving = true;
-            const ease = 0.035;
-            newX = w.x + dx * ease;
-            newY = w.y + dy * ease;
-            dir = dx < 0 ? ("left" as const) : dx > 0 ? ("right" as const) : w.dir;
           }
+        }
 
+        const timerChanged =
+          currentActionTimer !== w.actionTimer || currentActionLabel !== w.actionLabel;
+        if (
+          changed ||
+          isMoving !== w.isMoving ||
+          timerChanged ||
+          travelPhase !== (w.travelPhase ?? "idle") ||
+          targetX !== w.targetX ||
+          targetY !== w.targetY
+        ) {
           next[wid] = {
             ...w,
-            x: newX,
-            y: newY,
             targetX,
             targetY,
             isMoving,
-            dir,
             actionLabel: currentActionLabel,
             actionTimer: currentActionTimer,
+            travelPhase,
+            taskAnimalId,
+            taskPlotId,
+            taskTreeId,
+            pendingWorkLabel,
           };
           updated = true;
-        });
-
-        return updated ? next : prev;
+        }
       });
-    }, walkMs);
+
+      if (updated) {
+        workersPositionsRef.current = next;
+        setWorkersPositions(next);
+      }
+
+      pendingTaskResults.forEach(({ workLabel }) => {
+        triggerNotification(workLabel);
+      });
+
+      const anyWorkerMoving = (Object.keys(next) as string[]).some((wid) => {
+        const w = next[wid];
+        const inst = workersRef.current?.find((gw) => gw.id === wid);
+        if (!inst?.isActive || !w) return false;
+        const live = workerLiveRef.current.get(wid);
+        return workerNeedsMovement(w, live?.x, live?.y);
+      });
+      if (anyWorkerMoving) tossWakeRef.current();
+    }, decisionMs);
 
     return () => clearInterval(walkTimer);
   }, [deviceKind, isPhone]);
+
+  // Сразу даём работникам цель при входе в их зону (не ждём таймер решений)
+  useEffect(() => {
+    const gs = gameStateRef.current;
+    const next = { ...workersPositionsRef.current };
+    let changed = false;
+
+    (gs.workers ?? []).forEach((worker) => {
+      if (!worker.isActive || worker.isBundledWithHome) return;
+      const pos = next[worker.id];
+      if (!pos || pos.currentZone !== activeZone) return;
+      if (pos.travelPhase && pos.travelPhase !== "idle") return;
+      if (pos.actionTimer > 0) return;
+
+      const dutyZone = pickWorkerTravelZone(
+        worker.id,
+        gs.animals || [],
+        gs.inventory || {},
+        worker.assignedLocationId || "MEADOW"
+      );
+      const task =
+        pos.currentZone === dutyZone
+          ? findWorkerTaskTarget(worker.id, gs, dutyZone)
+          : null;
+
+      if (task) {
+        next[worker.id] = {
+          ...patchWorkerFromLive(worker.id, pos),
+          travelPhase: "toTask",
+          targetX: task.x,
+          targetY: task.y,
+          taskAnimalId: task.animalId,
+          taskPlotId: task.plotId,
+          taskTreeId: task.treeId,
+          actionLabel: task.approachLabel,
+          pendingWorkLabel: task.workLabel,
+          isMoving: true,
+        };
+        changed = true;
+      } else {
+        const synced = patchWorkerFromLive(worker.id, pos);
+        const wander = randomWanderTarget(worker.id, pos.currentZone);
+        if (Math.hypot(wander.x - synced.x, wander.y - synced.y) > 2) {
+          next[worker.id] = {
+            ...synced,
+            targetX: wander.x,
+            targetY: wander.y,
+            isMoving: true,
+          };
+          changed = true;
+        }
+      }
+    });
+
+    if (changed) {
+      workersPositionsRef.current = next;
+      setWorkersPositions(next);
+      tossWakeRef.current();
+    }
+  }, [activeZone]);
 
   // Keyboard controls
   useEffect(() => {
@@ -1827,11 +1792,15 @@ export default function App() {
     draggedDistanceRef.current = 0;
 
     const animalInstance = gameState.animals.find((a) => a.id === animalId);
+    const startX = animalInstance?.x ?? 50;
+    const startY = animalInstance?.y ?? 75;
     if (animalInstance) {
-      lastDragCoordsRef.current = [{ x: animalInstance.x, y: animalInstance.y, t: Date.now() }];
+      lastDragCoordsRef.current = [{ x: startX, y: startY, t: Date.now() }];
     } else {
       lastDragCoordsRef.current = [{ x: 50, y: 75, t: Date.now() }];
     }
+    dragAnimalLiveRef.current = { x: startX, y: startY, vx: 0, vy: 0 };
+    setDragRoamerPosition(`roamer-${animalId}`, startX, startY);
 
     setGameState((prev) => {
       const updated = prev.animals.map((a) => {
@@ -1840,7 +1809,7 @@ export default function App() {
             ...a,
             vx: 0,
             vy: 0,
-            groundY: typeof a.groundY === "number" ? a.groundY : a.y,
+            groundY: resolveGroundY(a),
           };
         }
         return a;
@@ -1932,9 +1901,11 @@ export default function App() {
     setDraggedWorkerId(workerId);
     workerDraggedDistanceRef.current = 0;
     const pos = workersPositions[workerId];
-    lastWorkerDragCoordsRef.current = [
-      { x: pos?.x ?? 50, y: pos?.y ?? 72, t: Date.now() },
-    ];
+    const startX = pos?.x ?? 50;
+    const startY = pos?.y ?? 72;
+    lastWorkerDragCoordsRef.current = [{ x: startX, y: startY, t: Date.now() }];
+    dragWorkerLiveRef.current = { x: startX, y: startY, vx: 0, vy: 0 };
+    setDragRoamerPosition(`worker-roamer-${workerId}`, startX, startY);
     setWorkersPositions((prev) => {
       const w = prev[workerId];
       if (!w) return prev;
@@ -1944,7 +1915,7 @@ export default function App() {
           ...w,
           vx: 0,
           vy: 0,
-          groundY: typeof w.groundY === "number" ? w.groundY : w.y,
+          groundY: resolveWorkerGroundY(w),
         },
       };
     });
@@ -1997,7 +1968,8 @@ export default function App() {
   };
 
   const handleWorkerDragMove = (clientX: number, clientY: number, container: HTMLDivElement) => {
-    if (!draggedWorkerId) return;
+    const workerId = draggedWorkerIdRef.current;
+    if (!workerId) return;
 
     const { x: constrainedX, y: constrainedY } = screenToPasturePercent(clientX, clientY, container);
     const now = Date.now();
@@ -2005,31 +1977,23 @@ export default function App() {
     list.push({ x: constrainedX, y: constrainedY, t: now });
     if (list.length > 5) list.shift();
 
-    setWorkersPositions((prev) => {
-      const w = prev[draggedWorkerId];
-      if (!w) return prev;
-      const dx = constrainedX - w.x;
-      const dy = constrainedY - w.y;
-      workerDraggedDistanceRef.current += Math.abs(dx) + Math.abs(dy);
-      return {
-        ...prev,
-        [draggedWorkerId]: {
-          ...w,
-          x: constrainedX,
-          y: constrainedY,
-          vx: dx * 0.98,
-          vy: dy * 0.98,
-          groundY: typeof w.groundY === "number" ? w.groundY : w.y,
-          isMoving: false,
-          targetX: constrainedX,
-          targetY: constrainedY,
-        },
-      };
-    });
+    const prev = dragWorkerLiveRef.current;
+    const w = workersPositionsRef.current[workerId];
+    const prevX = prev?.x ?? w?.x ?? constrainedX;
+    const prevY = prev?.y ?? w?.y ?? constrainedY;
+    workerDraggedDistanceRef.current += Math.abs(constrainedX - prevX) + Math.abs(constrainedY - prevY);
+    dragWorkerLiveRef.current = {
+      x: constrainedX,
+      y: constrainedY,
+      vx: (constrainedX - prevX) * 0.98,
+      vy: (constrainedY - prevY) * 0.98,
+    };
+    scheduleDragDomFlush();
   };
 
   const handlePastureDragMove = (clientX: number, clientY: number, container: HTMLDivElement) => {
-    if (!draggedAnimalId) return;
+    const animalId = draggedAnimalIdRef.current;
+    if (!animalId) return;
 
     const { x: constrainedX, y: constrainedY } = screenToPasturePercent(clientX, clientY, container);
 
@@ -2037,32 +2001,21 @@ export default function App() {
     const list = lastDragCoordsRef.current;
     list.push({ x: constrainedX, y: constrainedY, t: now });
     if (list.length > 5) {
-      list.shift(); // keep last 5 points
+      list.shift();
     }
 
-    setGameState((prev) => {
-      const updated = prev.animals.map((a) => {
-        if (a.id === draggedAnimalId) {
-          const dx = constrainedX - a.x;
-          const dy = constrainedY - a.y;
-          draggedDistanceRef.current += Math.abs(dx) + Math.abs(dy);
-
-          return {
-            ...a,
-            x: constrainedX,
-            y: constrainedY,
-            vx: dx * 0.98,
-            vy: dy * 0.98,
-            groundY: typeof a.groundY === "number" ? a.groundY : a.y,
-          };
-        }
-        return a;
-      });
-      return {
-        ...prev,
-        animals: updated
-      };
-    });
+    const prev = dragAnimalLiveRef.current;
+    const animal = gameStateRef.current.animals.find((a) => a.id === animalId);
+    const prevX = prev?.x ?? animal?.x ?? constrainedX;
+    const prevY = prev?.y ?? animal?.y ?? constrainedY;
+    draggedDistanceRef.current += Math.abs(constrainedX - prevX) + Math.abs(constrainedY - prevY);
+    dragAnimalLiveRef.current = {
+      x: constrainedX,
+      y: constrainedY,
+      vx: (constrainedX - prevX) * 0.98,
+      vy: (constrainedY - prevY) * 0.98,
+    };
+    scheduleDragDomFlush();
   };
 
   const handlePasturePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -2103,16 +2056,16 @@ export default function App() {
         }
       }
     }
-    if (draggedWorkerId) {
+    if (draggedWorkerIdRef.current) {
       if (e.pointerType === "touch") e.preventDefault();
       handleWorkerDragMove(e.clientX, e.clientY, e.currentTarget);
-      reportInputDebug(e.pointerType, "drag", draggedWorkerId);
+      reportInputDebug(e.pointerType, "drag", draggedWorkerIdRef.current);
       return;
     }
-    if (draggedAnimalId) {
+    if (draggedAnimalIdRef.current) {
       if (e.pointerType === "touch") e.preventDefault();
       handlePastureDragMove(e.clientX, e.clientY, e.currentTarget);
-      reportInputDebug(e.pointerType, "drag", draggedAnimalId);
+      reportInputDebug(e.pointerType, "drag", draggedAnimalIdRef.current);
     }
   };
 
@@ -2167,9 +2120,15 @@ export default function App() {
     if (draggedWorkerId) {
       const list = lastWorkerDragCoordsRef.current;
       const { vx: calculatedVx, vy: calculatedVy } = computeThrowVelocity(list);
+      const live = dragWorkerLiveRef.current;
 
       const tossedId = draggedWorkerId;
       setDraggedWorkerId(null);
+      dragWorkerLiveRef.current = null;
+      if (dragDomRafRef.current) {
+        cancelAnimationFrame(dragDomRafRef.current);
+        dragDomRafRef.current = 0;
+      }
       justFinishedDraggingWorkerRef.current = true;
       setTimeout(() => {
         justFinishedDraggingWorkerRef.current = false;
@@ -2178,35 +2137,47 @@ export default function App() {
       setWorkersPositions((prev) => {
         const w = prev[tossedId];
         if (!w) return prev;
+        const fx = live?.x ?? w.x;
+        const fy = live?.y ?? w.y;
         const groundY = resolveWorkerGroundY(w);
         let next = {
           ...w,
+          x: fx,
+          y: fy,
           vx: calculatedVx,
           vy: calculatedVy,
           groundY,
           angle: 0,
-          targetX: w.x,
-          targetY: w.y,
+          targetX: fx,
+          targetY: fy,
           isMoving: false,
         };
         if (next.y < groundY - 0.5 && Math.abs(calculatedVy) < 0.05 && Math.abs(calculatedVx) < 0.05) {
           next = { ...next, vy: 0.25 };
         }
-        return { ...prev, [tossedId]: next };
+        const result = { ...prev, [tossedId]: next };
+        workersPositionsRef.current = result;
+        return result;
       });
+      clearDragRoamerDom(`worker-roamer-${tossedId}`);
       tossWakeRef.current();
     }
 
     isWorkerDraggingConfirmedRef.current = false;
 
     if (draggedAnimalId) {
-      const distance = draggedDistanceRef.current;
-      const animal = gameState.animals.find((a) => a.id === draggedAnimalId);
-      
+      const live = dragAnimalLiveRef.current;
+
       const list = lastDragCoordsRef.current;
       const { vx: calculatedVx, vy: calculatedVy } = computeThrowVelocity(list);
 
+      const tossedId = draggedAnimalId;
       setDraggedAnimalId(null);
+      dragAnimalLiveRef.current = null;
+      if (dragDomRafRef.current) {
+        cancelAnimationFrame(dragDomRafRef.current);
+        dragDomRafRef.current = 0;
+      }
       justFinishedDraggingRef.current = true;
       setTimeout(() => {
         justFinishedDraggingRef.current = false;
@@ -2214,10 +2185,14 @@ export default function App() {
 
       setGameState((prev) => {
         const updated = prev.animals.map((a) => {
-          if (a.id === draggedAnimalId) {
-            const penTpl = findPenAtPoint(a.x, a.y, prev.pens || [], activeZone);
+          if (a.id === tossedId) {
+            const fx = live?.x ?? a.x;
+            const fy = live?.y ?? a.y;
+            const penTpl = findPenAtPoint(fx, fy, prev.pens || [], activeZone);
             let next = {
               ...a,
+              x: fx,
+              y: fy,
               vx: calculatedVx,
               vy: calculatedVy,
               groundY: resolveGroundY(a),
@@ -2245,6 +2220,7 @@ export default function App() {
         gameStateRef.current = nextState;
         return nextState;
       });
+      clearDragRoamerDom(`roamer-${tossedId}`);
       tossWakeRef.current();
     }
   };
@@ -2986,8 +2962,12 @@ export default function App() {
       else if (key === "APPLE") basePrice = 50;
       else if (key === "CHERRY") basePrice = 80;
       else {
-        const found = Object.values(ANIMAL_TEMPLATES).find(t => t.productName === key);
-        if (found) basePrice = found.productPrice;
+        const bouquet = getBouquetCatalogEntry(key);
+        if (bouquet) basePrice = bouquet.sellPrice;
+        else {
+          const found = Object.values(ANIMAL_TEMPLATES).find(t => t.productName === key);
+          if (found) basePrice = found.productPrice;
+        }
       }
 
       const marketLvl = prev.upgrades["marketContract"] || 1;
@@ -3026,8 +3006,12 @@ export default function App() {
           else if (key === "APPLE") basePrice = 50;
           else if (key === "CHERRY") basePrice = 80;
           else {
-            const found = Object.values(ANIMAL_TEMPLATES).find(t => t.productName === key);
-            if (found) basePrice = found.productPrice;
+            const bouquet = getBouquetCatalogEntry(key);
+            if (bouquet) basePrice = bouquet.sellPrice;
+            else {
+              const found = Object.values(ANIMAL_TEMPLATES).find(t => t.productName === key);
+              if (found) basePrice = found.productPrice;
+            }
           }
 
           const marketLvl = prev.upgrades["marketContract"] || 1;
@@ -3094,7 +3078,7 @@ export default function App() {
     const constrainedX = Math.max(5, Math.min(95, clickX));
     const constrainedY = Math.max(54, Math.min(86, clickY));
 
-    if (targetElement.closest(".interactive-element")) {
+    if (targetElement.closest(".interactive-element") || targetElement.closest(".collectible-decor")) {
       return;
     }
 
@@ -3651,18 +3635,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* Joint Room Decorations - WILDFLOWERS SECURELY GROWING ON GREEN LAWN */}
-            {activeZone === "MEADOW" && (
-              <div className="absolute inset-0 pointer-events-none select-none z-0" id="meadow-flowers-decor">
-                <span className="absolute top-[62%] left-[10%] text-xl opacity-80 filter drop-shadow">🌸</span>
-                <span className="absolute top-[70%] right-[15%] text-lg opacity-85 filter drop-shadow">🌼</span>
-                <span className="absolute top-[82%] left-[24%] text-2xl opacity-80 filter drop-shadow">🌻</span>
-                <span className="absolute top-[76%] left-[72%] text-lg opacity-85 filter drop-shadow">🌹</span>
-                {/* Flapping cute cartoon butterflies */}
-                <span className="absolute top-[40%] left-[18%] text-3xl animate-bounce-slow select-none opacity-80 z-11">🦋</span>
-                <span className="absolute top-[58%] right-[22%] text-2xl animate-pulse select-none opacity-70 z-11">🦋</span>
-              </div>
-            )}
+            {/* 🌳 GROUND FOLIAGE — трава, кусты и деревья по типу локации */}
+            {activeZone !== "MAX_HOME" && <GroundFoliage zone={activeZone} />}
 
             {/* Lakeside Extra Decor (Frog and Ducks) */}
             {activeZone === "LAKESIDE" && (
@@ -3711,8 +3685,12 @@ export default function App() {
                   else if (key === "CHERRY") icon = "🍒";
                   else if (key.endsWith("_SEED")) icon = "🌱";
                   else {
-                    const match = Object.values(ANIMAL_TEMPLATES).find(t => t.productName === key);
-                    if (match) icon = match.productIcon;
+                    const bouquet = getBouquetCatalogEntry(key);
+                    if (bouquet) icon = bouquet.icon;
+                    else {
+                      const match = Object.values(ANIMAL_TEMPLATES).find(t => t.productName === key);
+                      if (match) icon = match.productIcon;
+                    }
                   }
 
                   return (
@@ -4262,9 +4240,11 @@ export default function App() {
               const isSelected = selectedAnimalId === animal.id;
               const template = ANIMAL_TEMPLATES[animal.species];
               const isDragged = draggedAnimalId === animal.id;
+              const roamX = isDragged ? (dragAnimalLiveRef.current?.x ?? animal.x) : animal.x;
+              const roamY = isDragged ? (dragAnimalLiveRef.current?.y ?? animal.y) : animal.y;
 
               if (
-                !isEntityVisible(animal.x, animal.y) &&
+                !isEntityVisible(roamX, roamY) &&
                 !isDragged &&
                 !isSelected
               ) {
@@ -4276,18 +4256,14 @@ export default function App() {
                   key={animal.id}
                   type="button"
                   onPointerDown={(e) => handleAnimalPointerDown(e, animal.id, animal.species)}
-                  className={`absolute select-none z-10 interactive-element touch-none border-0 bg-transparent p-0 outline-none focus:outline-none ${
+                  className={`absolute select-none z-[18] interactive-element touch-none border-0 bg-transparent p-0 outline-none focus:outline-none ${
                     isDragged
                       ? "z-50 cursor-grabbing"
                       : isSelected
                       ? "cursor-pointer"
                       : "cursor-pointer"
                   }`}
-                  style={{
-                    left: `${animal.x}%`,
-                    top: `${animal.y}%`,
-                    transform: "translate(-50%, -100%)",
-                  }}
+                  style={{ transform: "translate(-50%, -100%)" }}
                   id={`roamer-${animal.id}`}
                 >
                   {!animal.isFed ? (
@@ -4317,17 +4293,17 @@ export default function App() {
 
                   <div
                     data-animal-sprite
-                    className={`w-24 h-24 origin-bottom pointer-events-none ${
-                      isDragged
-                        ? "scale-135 filter drop-shadow-[0_12px_12px_rgba(251,191,36,0.95)] brightness-110"
-                        : isSelected
-                        ? "scale-125 filter drop-shadow-[0_8px_8px_rgba(251,191,36,0.9)] brightness-105"
-                        : "filter drop-shadow"
-                    } ${isNight ? "brightness-50 saturate-75 contrast-90" : ""}`}
-                    style={{
-                      transform: `rotate(${animal.angle || 0}deg) scaleX(${animal.scaleX})`,
-                    }}
+                    className="w-24 h-24 origin-bottom pointer-events-none"
                   >
+                    <div
+                      className={`w-full h-full ${
+                        isDragged
+                          ? "scale-135 filter drop-shadow-[0_12px_12px_rgba(251,191,36,0.95)] brightness-110"
+                          : isSelected
+                          ? "scale-125 filter drop-shadow-[0_8px_8px_rgba(251,191,36,0.9)] brightness-105"
+                          : "filter drop-shadow"
+                      } ${isNight ? "brightness-50 saturate-75 contrast-90" : ""}`}
+                    >
                     <AnimalSVG
                       species={animal.species}
                       happiness={animal.happiness}
@@ -4335,17 +4311,51 @@ export default function App() {
                       isSheared={animal.isSheared}
                       cleanliness={animal.cleanliness}
                     />
+                    </div>
                   </div>
                 </button>
               );
             })}
 
+            {/* 🌸 COLLECTIBLE WILDFLOWERS (grow on the lawn, click to pick) */}
+            {flowers.filter((f) => isEntityVisible(f.x, f.y, 6)).map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onPointerUp={(e) => {
+                  if (e.button !== 0) return;
+                  handleCollectFlower(f.id, e);
+                }}
+                className="absolute w-14 h-14 flex items-end justify-center select-none cursor-pointer transition-transform duration-200 active:scale-90 hover:scale-125 z-20 interactive-element touch-none collectible-decor"
+                style={{
+                  left: `${f.x}%`,
+                  top: `${f.y}%`,
+                  transform: "translate(-50%, -100%)",
+                }}
+                id={`flower-${f.id}`}
+              >
+                <span
+                  className="text-2xl filter drop-shadow-[0_2px_2px_rgba(0,0,0,0.25)]"
+                  style={{
+                    transformOrigin: "bottom center",
+                    animation: `flower-sway 3s ease-in-out ${f.swayDelay}s infinite`,
+                  }}
+                >
+                  {f.emoji}
+                </span>
+              </button>
+            ))}
+
             {/* 🦋 3D-EFFECT COLLECTIBLE BUTTERFLIES (Flit dynamically around pasture) */}
             {butterflies.filter((b) => isEntityVisible(b.x, b.y, 6)).map((b) => (
               <button
                 key={b.id}
-                onClick={(e) => handleCollectButterfly(b.id, e)}
-                className="absolute w-12 h-12 flex items-center justify-center select-none cursor-pointer transition-transform duration-200 active:scale-75 hover:scale-125 z-10"
+                type="button"
+                onPointerUp={(e) => {
+                  if (e.button !== 0) return;
+                  handleCollectButterfly(b.id, e);
+                }}
+                className="absolute w-12 h-12 flex items-center justify-center select-none cursor-pointer transition-transform duration-200 active:scale-75 hover:scale-125 z-20 interactive-element touch-none collectible-decor"
                 style={{
                   left: `${b.x}%`,
                   top: `${b.y}%`,
@@ -4407,28 +4417,7 @@ export default function App() {
               </button>
             ))}
 
-            {/* F. MAXIM — custom sprite (public/assets/characters/maxim/idle.png) */}
-            <div
-              ref={maxElRef}
-              className="absolute w-16 h-20 z-20 pointer-events-none select-none"
-            >
-              <div ref={maxWobbleElRef} className="relative flex flex-col items-center">
-                <img
-                  src={getMaxOutfitSpriteSrc(gameState.activeMaxOutfit)}
-                  alt="Максим"
-                  className={`w-16 h-20 object-contain object-bottom ${isPhone ? "" : "filter drop-shadow-md"}`}
-                  draggable={false}
-                  loading={isPhone ? "lazy" : "eager"}
-                  decoding="async"
-                  key={gameState.activeMaxOutfit ?? "default"}
-                />
-
-                {/* Feet shadow */}
-                <div className="absolute bottom-[-2px] bg-black/15 w-8 h-2 rounded-full filter blur-[1px]" />
-              </div>
-            </div>
-
-            {/* F2. ACTIVE HIRED WORKERS (👨‍🌾 👩‍🌾 👦🏻) - High-fidelity Visual Sprites! */}
+            {/* F2. ACTIVE HIRED WORKERS — под зверями, Макс всегда сверху */}
             {(gameState.workers ?? []).map((worker) => {
               if (worker.isBundledWithHome || worker.id === "worker-roman") return null;
               if (!worker.isActive) return null;
@@ -4465,8 +4454,10 @@ export default function App() {
 
               const isDragged = draggedWorkerId === worker.id;
               const tossAngle = pos?.angle ?? 0;
+              const roamX = isDragged ? (dragWorkerLiveRef.current?.x ?? posX) : posX;
+              const roamY = isDragged ? (dragWorkerLiveRef.current?.y ?? posY) : posY;
 
-              if (!isEntityVisible(posX, posY) && !isDragged) return null;
+              if (!isEntityVisible(roamX, roamY) && !isDragged) return null;
 
               return (
                 <button
@@ -4474,18 +4465,17 @@ export default function App() {
                   type="button"
                   id={`worker-roamer-${worker.id}`}
                   onPointerDown={(e) => handleWorkerPointerDown(e, worker.id)}
-                  className={`absolute z-20 pointer-events-auto cursor-pointer select-none interactive-element touch-none border-0 bg-transparent p-0 outline-none focus:outline-none ${
+                  className={`absolute z-[14] pointer-events-auto cursor-pointer select-none interactive-element touch-none border-0 bg-transparent p-0 outline-none focus:outline-none ${
                     isDragged
                       ? "z-50 cursor-grabbing"
                       : ""
                   }`}
-                  style={{
-                    left: `${posX}%`,
-                    top: `${posY}%`,
-                    transform: "translate(-50%, -100%)",
-                  }}
+                  style={{ transform: "translate(-50%, -100%)" }}
                 >
-                  <div className={`relative flex flex-col items-center ${isMoving ? "animate-walk-wobble" : ""}`}>
+                  <div
+                    data-worker-wobble
+                    className="relative flex flex-col items-center"
+                  >
                     <div className="absolute -top-7 px-1.5 py-0.5 bg-slate-900 border border-slate-600 text-slate-50 rounded-full text-[8px] font-black shadow-md flex items-center gap-1 whitespace-nowrap uppercase tracking-wider pointer-events-none">
                       <span>{worker.emoji}</span>
                       <span className={worker.id === "worker-fyodor" ? "normal-case" : ""}>
@@ -4502,18 +4492,16 @@ export default function App() {
                       </div>
                     )}
 
-                    <div
-                      data-worker-sprite
-                      className={`w-16 h-20 origin-bottom ${
-                        isDragged
-                          ? "scale-125 brightness-110 filter drop-shadow-[0_12px_12px_rgba(251,191,36,0.95)]"
-                          : "filter drop-shadow-md"
-                      }`}
-                      style={{
-                        transform: `rotate(${tossAngle}deg) scaleX(${dir === "left" ? -1 : 1})`,
-                      }}
-                    >
-                      <WorkerSVG workerId={worker.id} className="w-16 h-20" />
+                    <div data-worker-sprite className="w-16 h-20 origin-bottom">
+                      <div
+                        className={`w-full h-full ${
+                          isDragged
+                            ? "scale-125 brightness-110 filter drop-shadow-[0_12px_12px_rgba(251,191,36,0.95)]"
+                            : "filter drop-shadow-md"
+                        }`}
+                      >
+                        <WorkerSVG workerId={worker.id} className="w-16 h-20" />
+                      </div>
                     </div>
 
                     {/* Ground shadow for physical depth */}
@@ -4522,6 +4510,25 @@ export default function App() {
                 </button>
               );
             })}
+
+            {/* F. MAXIM — всегда поверх зверей и NPC */}
+            <div
+              ref={maxElRef}
+              className="absolute w-16 h-20 z-[40] pointer-events-none select-none"
+            >
+              <div ref={maxWobbleElRef} className="relative flex flex-col items-center">
+                <img
+                  src={getMaxOutfitSpriteSrc(gameState.activeMaxOutfit)}
+                  alt="Максим"
+                  className={`w-16 h-20 object-contain object-bottom ${isPhone ? "" : "filter drop-shadow-md"}`}
+                  draggable={false}
+                  loading={isPhone ? "lazy" : "eager"}
+                  decoding="async"
+                  key={gameState.activeMaxOutfit ?? "default"}
+                />
+                <div className="absolute bottom-[-2px] bg-black/15 w-8 h-2 rounded-full filter blur-[1px]" />
+              </div>
+            </div>
 
             {/* G. COSMIC FLOATING COSY PARTICLES (Hearts & emoji splashes) */}
             {floatingHearts.map((heart) => (
@@ -5016,11 +5023,18 @@ export default function App() {
                     else if (key === "APPLE") { basePrice = 50; icon = "🍎"; nameRu = "Яблоко"; }
                     else if (key === "CHERRY") { basePrice = 80; icon = "🍒"; nameRu = "Вишня"; }
                     else {
-                      const template = Object.values(ANIMAL_TEMPLATES).find((t) => t.productName === key);
-                      if (template) {
-                        basePrice = template.productPrice;
-                        icon = template.productIcon;
-                        nameRu = template.productName;
+                      const bouquet = getBouquetCatalogEntry(key);
+                      if (bouquet) {
+                        basePrice = bouquet.sellPrice;
+                        icon = bouquet.icon;
+                        nameRu = bouquet.nameRu;
+                      } else {
+                        const template = Object.values(ANIMAL_TEMPLATES).find((t) => t.productName === key);
+                        if (template) {
+                          basePrice = template.productPrice;
+                          icon = template.productIcon;
+                          nameRu = template.productName;
+                        }
                       }
                     }
 

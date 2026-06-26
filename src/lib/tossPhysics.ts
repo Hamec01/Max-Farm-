@@ -140,32 +140,111 @@ export function applyKinematicsToAnimal(animal: AnimalInstance, k: TossKinematic
   };
 }
 
-export function applyAnimalTossDom(animal: AnimalInstance): void {
-  const root = document.getElementById(`roamer-${animal.id}`);
+export function setRoamerWillChange(root: HTMLElement | null, active: boolean): void {
   if (!root) return;
-  root.style.left = `${animal.x}%`;
-  root.style.top = `${animal.y}%`;
-  const sprite = root.querySelector("[data-animal-sprite]") as HTMLElement | null;
-  if (sprite) {
-    sprite.style.transform = `rotate(${animal.angle || 0}deg) scaleX(${animal.scaleX})`;
-  }
+  root.style.willChange = active ? "transform" : "";
 }
 
-export function applyWorkerTossDom(
-  workerId: string,
+/** Скорость ходьбы работников — % мира в секунду (не зависит от FPS) */
+export const WORKER_WALK_SPEED = 22;
+
+export interface WalkStep {
+  x: number;
+  y: number;
+  dir: "left" | "right";
+  moving: boolean;
+  arrived: boolean;
+}
+
+/** Плавный шаг к цели с постоянной скоростью */
+export function stepWalk(
+  x: number,
+  y: number,
+  targetX: number,
+  targetY: number,
+  dtMs: number,
+  prevDir: "left" | "right",
+  speedPerSec = WORKER_WALK_SPEED,
+  arriveDist = 0.5
+): WalkStep {
+  const dx = targetX - x;
+  const dy = targetY - y;
+  const dist = Math.hypot(dx, dy);
+  if (dist <= arriveDist) {
+    return { x: targetX, y: targetY, dir: prevDir, moving: false, arrived: true };
+  }
+  const stepSize = (speedPerSec * dtMs) / 1000;
+  const step = Math.min(dist, stepSize);
+  const dir = dx < -0.01 ? "left" : dx > 0.01 ? "right" : prevDir;
+  return {
+    x: x + (dx / dist) * step,
+    y: y + (dy / dist) * step,
+    dir,
+    moving: true,
+    arrived: false,
+  };
+}
+
+/**
+ * Низкоуровневое позиционирование животного: left%/top% + поворот спрайта.
+ * Единая система координат с React-рендером, якорь translate(-50%,-100%) статичен.
+ */
+export function placeAnimalDom(
+  id: string,
   x: number,
   y: number,
   angle: number,
-  dir: "left" | "right"
+  scaleX: number,
+  willChange = false
 ): void {
-  const root = document.getElementById(`worker-roamer-${workerId}`);
+  const root = document.getElementById(`roamer-${id}`);
   if (!root) return;
   root.style.left = `${x}%`;
   root.style.top = `${y}%`;
+  root.style.willChange = willChange ? "transform" : "";
+  const sprite = root.querySelector("[data-animal-sprite]") as HTMLElement | null;
+  if (sprite) {
+    sprite.style.transform = `rotate(${angle || 0}deg) scaleX(${scaleX})`;
+  }
+}
+
+export function placeWorkerDom(
+  id: string,
+  x: number,
+  y: number,
+  angle: number,
+  dir: "left" | "right",
+  isMoving: boolean,
+  willChange = false
+): void {
+  const root = document.getElementById(`worker-roamer-${id}`);
+  if (!root) return;
+  root.style.left = `${x}%`;
+  root.style.top = `${y}%`;
+  root.style.willChange = willChange ? "transform" : "";
   const sprite = root.querySelector("[data-worker-sprite]") as HTMLElement | null;
   if (sprite) {
     sprite.style.transform = `rotate(${angle}deg) scaleX(${dir === "left" ? -1 : 1})`;
   }
+  const wob = root.querySelector("[data-worker-wobble]") as HTMLElement | null;
+  if (wob) {
+    wob.classList.toggle("animate-walk-wobble", isMoving && !willChange);
+  }
+}
+
+/** Drag: двигаем DOM напрямую (left%/top%), без React-ререндера каждый пиксель */
+export function setDragRoamerPosition(elementId: string, x: number, y: number): void {
+  const root = document.getElementById(elementId);
+  if (!root) return;
+  root.style.left = `${x}%`;
+  root.style.top = `${y}%`;
+  root.style.willChange = "transform";
+}
+
+export function clearDragRoamerDom(elementId: string): void {
+  const root = document.getElementById(elementId);
+  if (!root) return;
+  root.style.willChange = "";
 }
 
 export function resolveWorkerGroundY(w: {
@@ -202,7 +281,7 @@ export function workerAirborne(w: {
 
 export function needsTossSimulation(
   animals: AnimalInstance[],
-  workers: Record<string, { vx?: number; vy?: number; angle?: number; y: number; groundY?: number; targetY?: number }>,
+  workers: Record<string, { x: number; vx?: number; vy?: number; angle?: number; y: number; groundY?: number; targetY?: number }>,
   draggedAnimalId: string | null,
   draggedWorkerId: string | null
 ): boolean {
