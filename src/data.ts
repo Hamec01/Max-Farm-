@@ -5,6 +5,7 @@
 
 import { AnimalConfig, AnimalSpecies, CropConfig, CropType, TreeConfig, TreeType, LocationConfig, LocationId, PlayerState, FarmUpgrade, BuildingConfig } from "./types";
 import { createInitialPenStates } from "./lib/penLogic";
+import { DEFAULT_MAX_OUTFIT_ID, MAX_OUTFITS } from "./data/maxOutfits";
 
 export const ANIMAL_TEMPLATES: Record<AnimalSpecies, AnimalConfig> = {
   [AnimalSpecies.CHICK]: {
@@ -972,7 +973,9 @@ export const INITIAL_STATE: PlayerState = {
     LAKE: [],
     HILLS: [],
     VALLEY: []
-  }
+  },
+  maxOutfits: [],
+  activeMaxOutfit: "default",
 };
 
 export const BUILDINGS_TEMPLATES: Record<LocationId, BuildingConfig[]> = {
@@ -1258,6 +1261,20 @@ export function loadSavedGameState(): PlayerState {
             isOpen: saved.isOpen ?? true,
           };
         });
+      })(),
+      maxOutfits: (() => {
+        const valid = new Set(
+          MAX_OUTFITS.map((o) => o.id).filter((id) => id !== DEFAULT_MAX_OUTFIT_ID)
+        );
+        if (!Array.isArray(parsed.maxOutfits)) return [...(INITIAL_STATE.maxOutfits ?? [])];
+        return parsed.maxOutfits.filter(
+          (id: unknown): id is string => typeof id === "string" && valid.has(id)
+        );
+      })(),
+      activeMaxOutfit: (() => {
+        const id = parsed.activeMaxOutfit;
+        if (typeof id !== "string") return DEFAULT_MAX_OUTFIT_ID;
+        return MAX_OUTFITS.some((o) => o.id === id) ? id : DEFAULT_MAX_OUTFIT_ID;
       })(),
       day: typeof parsed.day === "number" ? parsed.day : 1,
       dayProgress: typeof parsed.dayProgress === "number" ? parsed.dayProgress : 0,

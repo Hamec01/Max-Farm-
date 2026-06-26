@@ -1,0 +1,15 @@
+== public/assets/characters/maxim/idle.png size 279x599 head_bottom=218
+0 n= 371 cx= 0.658 cy= 0.324
+1 n= 358 cx= 0.339 cy= 0.324
+2 n= 1 cx= 0.584 cy= 0.326
+== public/assets/animals/chicken/happy.png size 1024x1024 head_bottom=397
+0 n= 988 cx= 0.489 cy= 0.26
+1 n= 762 cx= 0.366 cy= 0.262
+2 n= 510 cx= 0.497 cy= 0.243
+3 n= 219 cx= 0.35 cy= 0.228
+4 n= 68 cx= 0.366 cy= 0.24
+5 n= 56 cx= 0.486 cy= 0.239
+6 n= 52 cx= 0.374 cy= 0.226
+7 n= 50 cx= 0.49 cy= 0.181
+8 n= 42 cx= 0.33 cy= 0.246
+9 n= 32 cx= 0.46 cy= 0.232

@@ -8,6 +8,7 @@ import { reportInputDebug } from "../lib/input/inputDebug";
 interface MaxHomeInteriorProps {
   ownedFurniture: string[];
   onOpenShop: () => void;
+  onOpenWardrobe?: () => void;
   onImmersiveChange?: (immersive: boolean) => void;
 }
 
@@ -15,6 +16,7 @@ interface MaxHomeInteriorProps {
 export const MaxHomeInterior: React.FC<MaxHomeInteriorProps> = ({
   ownedFurniture,
   onOpenShop,
+  onOpenWardrobe,
   onImmersiveChange,
 }) => {
   const [inGameRoom, setInGameRoom] = useState(false);
@@ -99,6 +101,31 @@ export const MaxHomeInterior: React.FC<MaxHomeInteriorProps> = ({
           <div className="h-2 bg-yellow-400 rounded-sm" />
           <span className="text-[6px] font-black text-amber-100 text-center">📚</span>
         </div>
+      )}
+
+      {has("max_wardrobe") && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            playClickSound();
+            onOpenWardrobe?.();
+          }}
+          className="absolute z-25 pointer-events-auto touch-none active:scale-95 transition-transform"
+          style={{ left: "14%", top: "34%" }}
+          aria-label="Шкаф с одеждой Макса"
+          id="max-home-wardrobe"
+        >
+          <div className="px-2 py-0.5 bg-sky-100 border-2 border-sky-600 text-sky-950 rounded-xl text-[8px] font-black whitespace-nowrap mb-1 shadow animate-pulse">
+            👕 Костюмы!
+          </div>
+          <div className="w-16 h-24 bg-gradient-to-b from-amber-700 to-amber-900 border-4 border-amber-950 rounded-lg shadow-lg flex flex-col items-center justify-end pb-1 relative">
+            <div className="absolute top-1 left-1 right-1 h-3 bg-amber-950/40 rounded-sm" />
+            <div className="absolute top-5 left-2 w-3 h-14 bg-amber-600/50 rounded-sm border border-amber-950/30" />
+            <div className="absolute top-5 right-2 w-3 h-14 bg-amber-600/50 rounded-sm border border-amber-950/30" />
+            <span className="text-lg relative z-10">🚪</span>
+          </div>
+        </button>
       )}
 
       {has("max_bedroom_lamp") && (

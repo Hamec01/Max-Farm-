@@ -80,6 +80,17 @@ export const MAX_HOME_FURNITURE: BuildingConfig[] = [
     y: 50,
   },
   {
+    id: "max_wardrobe",
+    nameRu: "Шкаф с одеждой",
+    emoji: "🚪",
+    cost: 150,
+    minLevel: 2,
+    description: "Большой шкаф — внутри вешалки для костюмов Макса.",
+    benefitRu: "Покупай наряды и меняй скин на ферме",
+    x: 18,
+    y: 38,
+  },
+  {
     id: "max_bedroom_lamp",
     nameRu: "Ночник со звёздами",
     emoji: "🌙",

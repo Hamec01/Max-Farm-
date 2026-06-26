@@ -7,8 +7,8 @@ import React from "react";
 import { AnimalSpecies } from "../types";
 
 // НАСТРОЙКА СПРАЙТОВ ИЗ ФАЙЛОВ:
-// true — для видов из CUSTOM_SPRITE_SPECIES загружать PNG из `/public/assets/animals/`.
-// Сначала ищется .svg, затем .png; если ничего нет — встроенный SVG в коде.
+// true — для видов из CUSTOM_SPRITE_SPECIES загружать PNG/SVG из `/public/assets/animals/`.
+// Сначала .png, затем .svg; если ничего нет — встроенный SVG в коде.
 export const USE_CUSTOM_SPRITES = true;
 /** @deprecated имя сохранено для совместимости — используйте USE_CUSTOM_SPRITES */
 export const USE_PNG_SPRITES = USE_CUSTOM_SPRITES;
@@ -30,8 +30,8 @@ function getSpriteBaseName(isSheared: boolean, isSad: boolean, isDirty: boolean)
 function getSpriteCandidates(folderName: string, baseName: string): string[] {
   const names = baseName === "dirty" ? ["dirty", "hungry"] : [baseName];
   return names.flatMap((name) => [
-    `/assets/animals/${folderName}/${name}.svg`,
     `/assets/animals/${folderName}/${name}.png`,
+    `/assets/animals/${folderName}/${name}.svg`,
   ]);
 }
 
@@ -69,7 +69,7 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
     setFileSpritesFailed(false);
   }, [species, spriteBaseName]);
 
-  // Файловый спрайт: SVG → PNG → встроенный SVG
+  // Файловый спрайт: PNG → SVG → встроенный SVG (на всех устройствах)
   if (USE_CUSTOM_SPRITES && CUSTOM_SPRITE_SPECIES.has(species) && !fileSpritesFailed) {
     const spriteSrc = spriteCandidates[candidateIndex];
 
@@ -80,7 +80,7 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
           src={spriteSrc}
           alt={`${species} ${spriteBaseName}`}
           referrerPolicy="no-referrer"
-          className="w-full h-full object-contain filter drop-shadow-md select-none transition-transform active:scale-95 duration-200"
+          className="w-full h-full object-contain select-none transition-transform active:scale-95 duration-200"
           onError={() => {
             const nextIndex = candidateIndex + 1;
             if (nextIndex < spriteCandidates.length) {
@@ -356,8 +356,6 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
               {/* Funny bandage or shear mark */}
               <path d="M 38 52 Q 42 48 46 54" stroke="#FB7185" strokeWidth="2.5" fill="none" strokeLinecap="round" />
               <path d="M 52 58 Q 56 61 54 55" stroke="#FB7185" strokeWidth="2.5" fill="none" strokeLinecap="round" />
-              {/* Funny text/thought bubble helper */}
-              <text x="48" y="25" textAnchor="middle" fontSize="6.5" fill="#BE123C" fontWeight="bold">Вай, холодно!</text>
             </g>
           ) : (
             // Fluffy Woolly Body

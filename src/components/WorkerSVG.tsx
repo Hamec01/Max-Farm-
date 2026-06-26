@@ -1,4 +1,5 @@
 import React from "react";
+import { shouldUseHeavySprites } from "../lib/performanceProfile";
 
 interface WorkerSVGProps {
   workerId: string;
@@ -466,7 +467,7 @@ export const WorkerSVG: React.FC<WorkerSVGProps> = ({
     setSpriteFailed(false);
   }, [workerId]);
 
-  if (CUSTOM_WORKER_SPRITES.has(workerId) && !spriteFailed) {
+  if (shouldUseHeavySprites() && CUSTOM_WORKER_SPRITES.has(workerId) && !spriteFailed) {
     return (
       <img
         src={`/assets/characters/workers/${workerId}.png`}

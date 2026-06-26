@@ -9,25 +9,53 @@
 
 let audioCtx: AudioContext | null = null;
 let isMuted = false;
+let audioUnlocked = false;
 
-export function getAudioContext() {
-  if (isMuted) return null;
+/** Вызывать только после pointerdown / keydown / click пользователя */
+export function unlockAudioContext(): void {
+  if (typeof window === "undefined") return;
+  audioUnlocked = true;
+  if (isMuted) return;
+
   if (!audioCtx) {
-    // Standard audio context initialization
-    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    audioCtx = new Ctx();
   }
+
   if (audioCtx.state === "suspended") {
-    audioCtx.resume();
+    void audioCtx.resume().catch(() => {
+      /* браузер отклонил — ждём следующего жеста */
+    });
   }
+}
+
+export function isAudioUnlocked(): boolean {
+  return audioUnlocked;
+}
+
+export function getAudioContext(): AudioContext | null {
+  if (isMuted || !audioUnlocked) return null;
+
+  if (!audioCtx) {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return null;
+    audioCtx = new Ctx();
+  }
+
+  if (audioCtx.state === "suspended") {
+    void audioCtx.resume().catch(() => {});
+  }
+
   return audioCtx;
 }
 
 export function setMuteState(muted: boolean) {
   isMuted = muted;
   if (muted && audioCtx) {
-    audioCtx.suspend();
-  } else if (!muted && audioCtx) {
-    audioCtx.resume();
+    void audioCtx.suspend();
+  } else if (!muted && audioCtx && audioUnlocked) {
+    void audioCtx.resume().catch(() => {});
   }
 }
 

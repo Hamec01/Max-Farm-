@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, startTransition } from "react";
 import { PlayerState, AnimalSpecies, LocationId, CropType, TreeType, AnimalInstance, CropInstance, TreeInstance, Butterfly, FallingStar } from "./types";
 import { INITIAL_STATE, ANIMAL_TEMPLATES, CROPS_CONFIG, TREES_CONFIG, LOCATIONS, UPGRADES, BUILDINGS_TEMPLATES, WORKER_DESCRIPTIONS, loadSavedGameState } from "./data";
 import { GameHeader } from "./components/GameHeader";
@@ -46,13 +46,32 @@ import {
   screenFractionToWorld,
   isPointInCameraView,
   shouldCullOffscreen,
-  walkLoopMs,
   decorLoopMs,
   maxDecorButterflies,
   shouldSpawnWind,
   saveDebounceMs,
   isLiteEffects,
 } from "./lib/mobileCamera";
+import { stepBoyWalk, BOY_FOOTSTEP_EVERY, type BoyWalkState } from "./lib/boyMovement";
+import {
+  applyAnimalTossDom,
+  applyKinematicsToAnimal,
+  applyWorkerTossDom,
+  animalToKinematics,
+  computeThrowVelocity,
+  isAnimalAirborne,
+  needsTossSimulation,
+  resolveGroundY,
+  resolveWorkerGroundY,
+  stepToss,
+  TOSS_MAX_ANGLE,
+} from "./lib/tossPhysics";
+import {
+  setPerformanceDeviceKind,
+  physicsLoopMs,
+  gameTickMs,
+  shouldSpinTossedSprites,
+} from "./lib/performanceProfile";
 import {
   separateAnimalsByLocation,
   wanderAnimalAvoidingOthers,
@@ -89,7 +108,9 @@ import { WorkerSVG } from "./components/WorkerSVG";
 import { ScarecrowSVG } from "./components/ScarecrowSVG";
 import { MaxHomeInterior } from "./components/MaxHomeInterior";
 import { MaxHomeShop } from "./components/MaxHomeShop";
+import { MaxWardrobeModal } from "./components/MaxWardrobeModal";
 import { MAX_HOME_FURNITURE } from "./data/maxHomeFurniture";
+import { getMaxOutfit, getMaxOutfitSpriteSrc, isMaxOutfitOwned } from "./data/maxOutfits";
 import { LocationMapModal } from "./components/LocationMapModal";
 import { InputDebugOverlay } from "./components/InputDebugOverlay";
 import { isDoubleTap } from "./lib/input/doubleTap";
@@ -137,11 +158,17 @@ export default function App() {
   const isCompact = deviceKind !== "desktop";
   const liteEffects = isLiteEffects(deviceKind);
 
+  useEffect(() => {
+    setPerformanceDeviceKind(deviceKind);
+  }, [deviceKind]);
+
   // Load state from local storage or use initial state
   const [gameState, setGameState] = useState<PlayerState>(() => loadSavedGameState());
 
   const [selectedAnimalId, setSelectedAnimalId] = useState<string | null>(null);
   const [draggedAnimalId, setDraggedAnimalId] = useState<string | null>(null);
+  const draggedAnimalIdRef = useRef<string | null>(null);
+  const draggedWorkerIdRef = useRef<string | null>(null);
   const [draggedWorkerId, setDraggedWorkerId] = useState<string | null>(null);
   const [selectedPlotId, setSelectedPlotId] = useState<string | null>(null);
   const [selectedTreeId, setSelectedTreeId] = useState<string | null>(null);
@@ -149,6 +176,7 @@ export default function App() {
   const [isBagCollapsed, setIsBagCollapsed] = useState<boolean>(false);
   const [shopActiveTab, setShopActiveTab] = useState<"sell" | "animals" | "upgrades" | "lands" | "workers" | "pens">("sell");
   const [showMaxHomeShop, setShowMaxHomeShop] = useState<boolean>(false);
+  const [showMaxWardrobe, setShowMaxWardrobe] = useState<boolean>(false);
   const [showLocationMap, setShowLocationMap] = useState<boolean>(false);
 
   const [workersPositions, setWorkersPositions] = useState<Record<string, {
@@ -212,6 +240,14 @@ export default function App() {
   workersRef.current = gameState.workers;
   const gameStateRef = useRef(gameState);
   gameStateRef.current = gameState;
+
+  useEffect(() => {
+    draggedAnimalIdRef.current = draggedAnimalId;
+  }, [draggedAnimalId]);
+
+  useEffect(() => {
+    draggedWorkerIdRef.current = draggedWorkerId;
+  }, [draggedWorkerId]);
   const workerZoneTickRef = useRef(0);
   const [customNotification, setCustomNotification] = useState<string | null>(null);
   const [gameRoomImmersive, setGameRoomImmersive] = useState(false);
@@ -234,8 +270,15 @@ export default function App() {
     targetX: 50,
     targetY: 60,
     isMoving: false,
-    dir: "right" as "left" | "right"
+    dir: "right" as "left" | "right",
   });
+  const boyPositionRef = useRef(boyPosition);
+  const maxElRef = useRef<HTMLDivElement | null>(null);
+  const maxWobbleElRef = useRef<HTMLDivElement | null>(null);
+  const tossWakeRef = useRef<() => void>(() => {});
+  const stageElRef = useRef<HTMLDivElement | null>(null);
+  const effectiveZoomRef = useRef(effectiveZoom);
+  effectiveZoomRef.current = effectiveZoom;
 
   const [floatingHearts, setFloatingHearts] = useState<{ id: number; x: number; y: number; emoji: string }[]>([]);
 
@@ -244,14 +287,18 @@ export default function App() {
   const [fallingStars, setFallingStars] = useState<FallingStar[]>([]);
   const [pondFish, setPondFish] = useState<FishInstance[]>([]);
 
-  // Инициализируем несколько стартовых красивых бабочек
+  // Инициализируем бабочек (на телефоне — меньше)
   useEffect(() => {
+    if (isPhone) {
+      setButterflies([]);
+      return;
+    }
     const initialButterflies: Butterfly[] = [
       { id: "b1", x: 30, y: 35, type: "green", emoji: "🦋", vx: 0.1, vy: -0.1 },
       { id: "b2", x: 65, y: 45, type: "pink", emoji: "🦋", vx: -0.12, vy: 0.08 },
     ];
     setButterflies(initialButterflies);
-  }, []);
+  }, [isPhone]);
 
   // Рыбки в пруду (озеро LAKESIDE)
   useEffect(() => {
@@ -484,9 +531,13 @@ export default function App() {
       const dp = gameState.dayProgress ?? 0;
       if (!isMuted) updateBackgroundMusic(dp >= 192);
     };
-    window.addEventListener("pointerdown", onFirstInteract, { once: true });
-    return () => window.removeEventListener("pointerdown", onFirstInteract);
-  }, []);
+    window.addEventListener("pointerdown", onFirstInteract, { once: true, capture: true });
+    window.addEventListener("keydown", onFirstInteract, { once: true, capture: true });
+    return () => {
+      window.removeEventListener("pointerdown", onFirstInteract, { capture: true });
+      window.removeEventListener("keydown", onFirstInteract, { capture: true });
+    };
+  }, [gameState.dayProgress, isMuted]);
 
   useEffect(() => {
     if (!audioUnlockedRef.current || isMuted) return;
@@ -541,6 +592,7 @@ export default function App() {
 
   // Real-time ticking engine for crops growth, satiety decay, animal production, day cycles and helper workers
   useEffect(() => {
+    const tickMs = gameTickMs(deviceKind);
     const timer = setInterval(() => {
       setGameState((prev) => {
         // --- 0. Day Progression & Payment Tracking ---
@@ -1215,10 +1267,10 @@ export default function App() {
 
         return updatedState;
       });
-    }, 1000);
+    }, tickMs);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [deviceKind]);
 
   // Редкие звуки природы и животных на локации
   useEffect(() => {
@@ -1245,8 +1297,8 @@ export default function App() {
   }, [gameState.animals, gameState.dayProgress, activeZone, isMuted, deviceKind]);
 
   const { shiftX, shiftY } = isMobileCamera
-    ? resolveCameraShifts(boyPosition.x, boyPosition.y, effectiveZoom, deviceKind, activeZone)
-    : { shiftX: resolveDesktopShiftX(boyPosition.x, effectiveZoom), shiftY: 0 };
+    ? resolveCameraShifts(boyPositionRef.current.x, boyPositionRef.current.y, effectiveZoom, deviceKind, activeZone)
+    : { shiftX: resolveDesktopShiftX(boyPositionRef.current.x, effectiveZoom), shiftY: 0 };
   const cullOffscreen = shouldCullOffscreen(deviceKind, activeZone);
 
   const isEntityVisible = (x: number, y: number, margin = 10) =>
@@ -1273,149 +1325,302 @@ export default function App() {
   const audioUnlockedRef = useRef(false);
   const lastWindRef = useRef(0);
   const animalSpacingTickRef = useRef(0);
+  const footstepDistanceRef = useRef(0);
 
-  // Smooth walk & animal physics loop
-  useEffect(() => {
-    const walkMs = walkLoopMs(deviceKind);
-    const walkTimer = setInterval(() => {
-      // 1. Move player boy
-      setBoyPosition((prev) => {
-        if (draggedAnimalId || draggedWorkerId) {
-          // Keep stationary and reset targeting while dragging an animal!
-          return { ...prev, targetX: prev.x, targetY: prev.y, isMoving: false };
-        }
-
-        const dx = prev.targetX - prev.x;
-        const dy = prev.targetY - prev.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist < 0.6) {
-          if (prev.isMoving) {
-            return { ...prev, x: prev.targetX, y: prev.targetY, isMoving: false };
-          }
-          return prev;
-        }
-
-        // Calculate smooth ease-out step (lerp decoding)
-        // Decelerates beautifully as he approaches the destination
-        const easeRatio = 0.045; // Silky-smooth slow walking blend deceleration
-        let stepX = dx * easeRatio;
-        let stepY = dy * easeRatio;
-
-        // Establish boundaries for minimum step rate to prevent lingering
-        const minStep = 0.5;
-        const currentStepSize = Math.sqrt(stepX * stepX + stepY * stepY);
-        if (currentStepSize < minStep && dist > 0.01) {
-          const scale = minStep / dist;
-          stepX = dx * scale;
-          stepY = dy * scale;
-        }
-
-        const nextX = Math.abs(dx) <= Math.abs(stepX) ? prev.targetX : prev.x + stepX;
-        const nextY = Math.abs(dy) <= Math.abs(stepY) ? prev.targetY : prev.y + stepY;
-        const nextDir = dx < 0 ? ("left" as const) : dx > 0 ? ("right" as const) : prev.dir;
-
-        playFootstepSound();
-
-        return {
-          ...prev,
-          x: nextX,
-          y: nextY,
-          isMoving: true,
-          dir: nextDir
-        };
-      });
-
-      // 2. Gravity physical motion update for un-dragged animals
-      setGameState((prev) => {
-        let hasChanges = false;
-        const updatedAnimals = prev.animals.map((animal) => {
-          if (animal.id === draggedAnimalId) {
-            return animal; // handled dynamically in dragging handlers
-          }
-
-          let ax = animal.x;
-          let ay = animal.y;
-          let avx = animal.vx || 0;
-          let avy = animal.vy || 0;
-          let angle = animal.angle || 0;
-          const groundY = animal.groundY || 75;
-
-          // If animal is above its ground level or has velocity
-          if (ay < groundY || Math.abs(avy) > 0.05 || Math.abs(avx) > 0.05) {
-            hasChanges = true;
-            avy += 0.45; // softer, higher trajectory gravity index
-            ay += avy;
-            ax += avx;
-            avx *= 0.96; // air resistance decay
-
-            if (ay < groundY) {
-              angle += avx * 3.5; // gorgeous physical flip spin!
-            } else {
-              angle *= 0.65; // settle angle rotation once hit the deck
-              if (Math.abs(angle) < 0.5) angle = 0;
-            }
-
-            // Keep inside visible screen bounds (5% to 95%)
-            if (ax < 5) {
-              ax = 5;
-              avx = -avx * 0.55; // bounce off walls with elastic reflection!
-            }
-            if (ax > 95) {
-              ax = 95;
-              avx = -avx * 0.55;
-            }
-
-            // Hit ground bounce logic
-            if (ay >= groundY) {
-              ay = groundY;
-              if (Math.abs(avy) > 1.8) {
-                avy = -avy * 0.40; // bouncy response
-                playClickSound(); // landing tick sound
-              } else {
-                avy = 0;
-                avx = 0;
-                angle = 0;
-              }
-            }
-
-            return {
-              ...animal,
-              x: ax,
-              y: ay,
-              vx: avx,
-              vy: avy,
-              angle,
-              groundY
-            };
-          }
-          return animal;
-        });
-
-        animalSpacingTickRef.current += 1;
-        const shouldSeparateResting =
-          !draggedAnimalId && animalSpacingTickRef.current % 16 === 0;
-
-        if (shouldSeparateResting) {
-          const separated = separateAnimalsByLocation(updatedAnimals);
-          const moved = separated.some((a, i) => a.x !== updatedAnimals[i].x || a.y !== updatedAnimals[i].y);
-          if (moved) {
-            return { ...prev, animals: separated };
-          }
-        }
-
-        if (hasChanges) {
-          return {
-            ...prev,
-            animals: updatedAnimals
+  const applyBoyVisuals = (pos: BoyWalkState) => {
+    boyPositionRef.current = pos;
+    if (maxElRef.current) {
+      maxElRef.current.style.left = `${pos.x}%`;
+      maxElRef.current.style.top = `${pos.y}%`;
+      maxElRef.current.style.transform = `translate3d(-50%, -100%, 0) scaleX(${pos.dir === "left" ? -1 : 1})`;
+    }
+    if (maxWobbleElRef.current) {
+      maxWobbleElRef.current.classList.toggle("animate-walk-wobble", pos.isMoving);
+    }
+    if (stageElRef.current) {
+      const { shiftX, shiftY } = isMobileCamera
+        ? resolveCameraShifts(
+            pos.x,
+            pos.y,
+            effectiveZoomRef.current,
+            deviceKind,
+            activeZoneRef.current
+          )
+        : {
+            shiftX: resolveDesktopShiftX(pos.x, effectiveZoomRef.current),
+            shiftY: 0,
           };
+      stageElRef.current.style.transform = buildStageTransform(
+        effectiveZoomRef.current,
+        shiftX,
+        shiftY,
+        deviceKind
+      );
+    }
+  };
+
+  // Цель/телепорт из React → ref; x/y во время ходьбы не трогаем (их ведёт RAF)
+  useEffect(() => {
+    const r = boyPositionRef.current;
+    boyPositionRef.current = {
+      ...r,
+      targetX: boyPosition.targetX,
+      targetY: boyPosition.targetY,
+      isMoving: boyPosition.isMoving,
+      dir: boyPosition.dir,
+      ...(boyPosition.isMoving ? {} : { x: boyPosition.x, y: boyPosition.y }),
+    };
+    if (!boyPosition.isMoving) {
+      applyBoyVisuals(boyPositionRef.current);
+    }
+  }, [
+    boyPosition.targetX,
+    boyPosition.targetY,
+    boyPosition.isMoving,
+    boyPosition.dir,
+    boyPosition.x,
+    boyPosition.y,
+  ]);
+
+  // Ходьба Макса: только DOM каждый кадр; React обновляется лишь по приходу к цели
+  useEffect(() => {
+    let raf = 0;
+    let last = performance.now();
+
+    const tick = (now: number) => {
+      const dt = Math.min(32, now - last);
+      last = now;
+
+      if (!draggedAnimalId && !draggedWorkerId) {
+        const prev = boyPositionRef.current;
+        const next = stepBoyWalk(prev, dt);
+
+        if (
+          next.x !== prev.x ||
+          next.y !== prev.y ||
+          next.isMoving !== prev.isMoving ||
+          next.dir !== prev.dir
+        ) {
+          if (next.movedDistance > 0) {
+            footstepDistanceRef.current += next.movedDistance;
+            if (footstepDistanceRef.current >= BOY_FOOTSTEP_EVERY) {
+              playFootstepSound();
+              footstepDistanceRef.current = 0;
+            }
+          }
+
+          applyBoyVisuals(next);
+
+          if (prev.isMoving && !next.isMoving) {
+            setBoyPosition({
+              x: next.x,
+              y: next.y,
+              targetX: next.targetX,
+              targetY: next.targetY,
+              isMoving: false,
+              dir: next.dir,
+            });
+          }
         }
-        return prev;
+      }
+
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [draggedAnimalId, draggedWorkerId, deviceKind, isMobileCamera]);
+
+  useLayoutEffect(() => {
+    applyBoyVisuals(boyPositionRef.current);
+  }, [effectiveZoom, activeZone, deviceKind, isMobileCamera]);
+
+  // Подбрасывание — RAF только пока что-то летит или тащат (без вечного цикла)
+  useEffect(() => {
+    let raf = 0;
+    let last = performance.now();
+    let lastAnimalSync = 0;
+    let lastWorkerSync = 0;
+    let loopActive = false;
+    const spinAnimals = shouldSpinTossedSprites(deviceKind);
+    let liveAnimals = gameStateRef.current.animals;
+    let liveWorkers = workersPositionsRef.current;
+
+    const syncAnimals = (animals: AnimalInstance[], force = false) => {
+      const now = performance.now();
+      if (!force && now - lastAnimalSync < 160) return;
+      lastAnimalSync = now;
+      startTransition(() => {
+        setGameState((prev) => ({ ...prev, animals }));
+      });
+    };
+
+    const syncWorkers = (
+      next: typeof workersPositionsRef.current,
+      force = false
+    ) => {
+      const now = performance.now();
+      if (!force && now - lastWorkerSync < 160) return;
+      lastWorkerSync = now;
+      liveWorkers = next;
+      startTransition(() => {
+        setWorkersPositions(next);
+      });
+    };
+
+    const stopLoop = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      loopActive = false;
+    };
+
+    const wakeLoop = () => {
+      if (loopActive) return;
+      loopActive = true;
+      last = performance.now();
+      raf = requestAnimationFrame(tick);
+    };
+
+    const tick = (now: number) => {
+      const dt = Math.min(32, now - last);
+      last = now;
+
+      const draggedAnimal = draggedAnimalIdRef.current;
+      const draggedWorker = draggedWorkerIdRef.current;
+
+      liveAnimals = gameStateRef.current.animals;
+
+      if (!needsTossSimulation(liveAnimals, liveWorkers, draggedAnimal, draggedWorker)) {
+        stopLoop();
+        return;
+      }
+
+      liveAnimals = liveAnimals.map((refA) => {
+        const live = liveAnimals.find((a) => a.id === refA.id);
+        if (!live || !isAnimalAirborne(refA)) return refA;
+        if (isAnimalAirborne(live) && (live.vx || live.vy)) return live;
+        return refA;
       });
 
-      // 1.5. Move hired workers dynamically on the pasture
+      let animalsChanged = false;
+      let anyAnimalToss = false;
+      const nextAnimals = liveAnimals.map((animal) => {
+        if (animal.id === draggedAnimal) return animal;
+        const { next, active } = stepToss(animalToKinematics(animal), dt, spinAnimals);
+        if (!active && !isAnimalAirborne(animal)) return animal;
+        if (
+          next.x === animal.x &&
+          next.y === animal.y &&
+          next.vx === (animal.vx ?? 0) &&
+          next.vy === (animal.vy ?? 0) &&
+          next.angle === (animal.angle ?? 0)
+        ) {
+          return animal;
+        }
+        animalsChanged = true;
+        if (active) anyAnimalToss = true;
+        const updated = applyKinematicsToAnimal(animal, next);
+        applyAnimalTossDom(updated);
+        return updated;
+      });
+
+      if (animalsChanged) {
+        liveAnimals = nextAnimals;
+        gameStateRef.current = { ...gameStateRef.current, animals: nextAnimals };
+        syncAnimals(nextAnimals, !anyAnimalToss);
+      }
+
+      liveWorkers = { ...workersPositionsRef.current, ...liveWorkers };
+
+      let workersChanged = false;
+      let anyWorkerToss = false;
+      const nextWorkers = { ...liveWorkers };
+      for (const wid of Object.keys(nextWorkers)) {
+        const w = nextWorkers[wid];
+        const workerInst = workersRef.current?.find((gw) => gw.id === wid);
+        if (!workerInst?.isActive || w.currentZone !== activeZoneRef.current) continue;
+        if (wid === draggedWorker) continue;
+
+        const { next: k, active } = stepToss(
+          {
+            x: w.x,
+            y: w.y,
+            vx: w.vx ?? 0,
+            vy: w.vy ?? 0,
+            angle: w.angle ?? 0,
+            groundY: resolveWorkerGroundY(w),
+          },
+          dt,
+          false
+        );
+        if (!active && !(w.vx || w.vy || w.angle)) continue;
+        if (
+          k.x === w.x &&
+          k.y === w.y &&
+          k.vx === (w.vx ?? 0) &&
+          k.vy === (w.vy ?? 0) &&
+          k.angle === (w.angle ?? 0)
+        ) {
+          continue;
+        }
+
+        workersChanged = true;
+        if (active) anyWorkerToss = true;
+        nextWorkers[wid] = {
+          ...w,
+          x: k.x,
+          y: k.y,
+          vx: k.vx,
+          vy: k.vy,
+          angle: k.angle,
+          groundY: k.groundY,
+          isMoving: false,
+          targetX: k.x,
+          targetY: k.y,
+        };
+        applyWorkerTossDom(wid, k.x, k.y, k.angle, w.dir);
+      }
+
+      if (workersChanged) {
+        liveWorkers = nextWorkers;
+        syncWorkers(nextWorkers, !anyWorkerToss);
+      }
+
+      raf = requestAnimationFrame(tick);
+    };
+
+    tossWakeRef.current = wakeLoop;
+    wakeLoop();
+
+    return () => {
+      tossWakeRef.current = () => {};
+      stopLoop();
+    };
+  }, [deviceKind]);
+
+  useEffect(() => {
+    if (draggedAnimalId || draggedWorkerId) {
+      tossWakeRef.current();
+    }
+  }, [draggedAnimalId, draggedWorkerId]);
+
+  // Ходьба работников + раздвижение стоящих животных (редкий тик, без подбрасывания)
+  useEffect(() => {
+    const walkMs = physicsLoopMs(deviceKind);
+    const walkTimer = setInterval(() => {
+      if (!draggedAnimalIdRef.current) {
+        animalSpacingTickRef.current += 1;
+        if (animalSpacingTickRef.current % (isPhone ? 32 : 16) === 0) {
+          setGameState((prev) => {
+            const separated = separateAnimalsByLocation(prev.animals);
+            const moved = separated.some((a, i) => a.x !== prev.animals[i].x || a.y !== prev.animals[i].y);
+            return moved ? { ...prev, animals: separated } : prev;
+          });
+        }
+      }
+
       workerZoneTickRef.current += 1;
-      if (workerZoneTickRef.current % 100 === 0) {
+      if (workerZoneTickRef.current % (isPhone ? 220 : 100) === 0) {
         const gs = gameStateRef.current;
         setWorkersPositions((prev) => {
           let changed = false;
@@ -1459,60 +1664,14 @@ export default function App() {
           const w = next[wid];
           const workerInst = workersRef.current?.find((gw) => gw.id === wid);
           if (!workerInst?.isActive) return;
-          const wPos = next[wid];
-          if (wPos.currentZone !== activeZoneRef.current) return;
-          if (wid === draggedWorkerId) return;
+          if (w.currentZone !== activeZoneRef.current) return;
+          if (wid === draggedWorkerIdRef.current) return;
+          if (w.vy || w.vx || (w.angle ?? 0) !== 0) return;
 
-          let wx = w.x;
-          let wy = w.y;
-          let wvx = w.vx ?? 0;
-          let wvy = w.vy ?? 0;
-          let wangle = w.angle ?? 0;
-          const wGroundY = w.groundY ?? wy;
-
-          if (wy < wGroundY || Math.abs(wvy) > 0.05 || Math.abs(wvx) > 0.05) {
-            wvy += 0.45;
-            wy += wvy;
-            wx += wvx;
-            wvx *= 0.96;
-            if (wy < wGroundY) {
-              wangle += wvx * 3.5;
-            } else {
-              wangle *= 0.65;
-              if (Math.abs(wangle) < 0.5) wangle = 0;
-            }
-            if (wx < 5) { wx = 5; wvx = -wvx * 0.55; }
-            if (wx > 95) { wx = 95; wvx = -wvx * 0.55; }
-            if (wy >= wGroundY) {
-              wy = wGroundY;
-              if (Math.abs(wvy) > 0.5) {
-                wvy = -wvy * 0.35;
-                wvx *= 0.82;
-              } else {
-                wvy = 0;
-                wvx *= 0.88;
-              }
-            }
-            next[wid] = {
-              ...w,
-              x: wx,
-              y: wy,
-              vx: wvx,
-              vy: wvy,
-              angle: wangle,
-              isMoving: false,
-              targetX: wx,
-              targetY: wy,
-            };
-            updated = true;
-            return;
-          }
-
-          // Tick action bubble timer If active
           let currentActionTimer = w.actionTimer;
           let currentActionLabel = w.actionLabel;
           if (currentActionTimer > 0) {
-            currentActionTimer -= 30; // 30ms step
+            currentActionTimer -= walkMs;
             if (currentActionTimer <= 0) {
               currentActionTimer = 0;
               currentActionLabel = undefined;
@@ -1535,8 +1694,7 @@ export default function App() {
             newX = w.targetX;
             newY = w.targetY;
 
-            // Pick a random new spot occasionally near their zones!
-            const shouldPickNewTarget = Math.random() < 0.015; // check on tick
+            const shouldPickNewTarget = Math.random() < 0.015;
             if (shouldPickNewTarget && currentActionTimer === 0) {
               isMoving = true;
               if (wid === "worker-papa" || wid === "worker-pasha" || wid === "worker-sergey") {
@@ -1581,9 +1739,8 @@ export default function App() {
               }
             }
           } else {
-            // Smoothly move towards target
             isMoving = true;
-            const ease = 0.035; // gentle walk
+            const ease = 0.035;
             newX = w.x + dx * ease;
             newY = w.y + dy * ease;
             dir = dx < 0 ? ("left" as const) : dx > 0 ? ("right" as const) : w.dir;
@@ -1598,7 +1755,7 @@ export default function App() {
             isMoving,
             dir,
             actionLabel: currentActionLabel,
-            actionTimer: currentActionTimer
+            actionTimer: currentActionTimer,
           };
           updated = true;
         });
@@ -1608,13 +1765,13 @@ export default function App() {
     }, walkMs);
 
     return () => clearInterval(walkTimer);
-  }, [draggedAnimalId, draggedWorkerId, deviceKind]);
+  }, [deviceKind, isPhone]);
 
   // Keyboard controls
   useEffect(() => {
     const handleKeys = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
-      const speedOffset = 12;
+      const speedOffset = 8;
       let dx = 0;
       let dy = 0;
 
@@ -1683,7 +1840,7 @@ export default function App() {
             ...a,
             vx: 0,
             vy: 0,
-            groundY: a.groundY || a.y || 75
+            groundY: typeof a.groundY === "number" ? a.groundY : a.y,
           };
         }
         return a;
@@ -1778,6 +1935,19 @@ export default function App() {
     lastWorkerDragCoordsRef.current = [
       { x: pos?.x ?? 50, y: pos?.y ?? 72, t: Date.now() },
     ];
+    setWorkersPositions((prev) => {
+      const w = prev[workerId];
+      if (!w) return prev;
+      return {
+        ...prev,
+        [workerId]: {
+          ...w,
+          vx: 0,
+          vy: 0,
+          groundY: typeof w.groundY === "number" ? w.groundY : w.y,
+        },
+      };
+    });
   };
 
   const handleWorkerGreeting = (workerId: string, pointerType?: string) => {
@@ -1849,7 +2019,7 @@ export default function App() {
           y: constrainedY,
           vx: dx * 0.98,
           vy: dy * 0.98,
-          groundY: w.groundY || Math.max(58, Math.min(84, constrainedY)),
+          groundY: typeof w.groundY === "number" ? w.groundY : w.y,
           isMoving: false,
           targetX: constrainedX,
           targetY: constrainedY,
@@ -1883,8 +2053,7 @@ export default function App() {
             y: constrainedY,
             vx: dx * 0.98,
             vy: dy * 0.98,
-            // Keep original ground under the pasture lawn
-            groundY: a.groundY || Math.max(58, Math.min(84, constrainedY))
+            groundY: typeof a.groundY === "number" ? a.groundY : a.y,
           };
         }
         return a;
@@ -1997,21 +2166,7 @@ export default function App() {
 
     if (draggedWorkerId) {
       const list = lastWorkerDragCoordsRef.current;
-      let calculatedVx = 0;
-      let calculatedVy = 0;
-      if (list.length >= 2) {
-        const first = list[0];
-        const last = list[list.length - 1];
-        const dt = Math.max(1, last.t - first.t);
-        calculatedVx = ((last.x - first.x) / dt) * 15;
-        calculatedVy = ((last.y - first.y) / dt) * 15;
-        const speed = Math.sqrt(calculatedVx * calculatedVx + calculatedVy * calculatedVy);
-        const maxSpeed = 7.0;
-        if (speed > maxSpeed) {
-          calculatedVx = (calculatedVx / speed) * maxSpeed;
-          calculatedVy = (calculatedVy / speed) * maxSpeed;
-        }
-      }
+      const { vx: calculatedVx, vy: calculatedVy } = computeThrowVelocity(list);
 
       const tossedId = draggedWorkerId;
       setDraggedWorkerId(null);
@@ -2023,19 +2178,23 @@ export default function App() {
       setWorkersPositions((prev) => {
         const w = prev[tossedId];
         if (!w) return prev;
-        return {
-          ...prev,
-          [tossedId]: {
-            ...w,
-            vx: calculatedVx,
-            vy: calculatedVy,
-            angle: calculatedVx * 4,
-            targetX: w.x,
-            targetY: w.y,
-            isMoving: false,
-          },
+        const groundY = resolveWorkerGroundY(w);
+        let next = {
+          ...w,
+          vx: calculatedVx,
+          vy: calculatedVy,
+          groundY,
+          angle: 0,
+          targetX: w.x,
+          targetY: w.y,
+          isMoving: false,
         };
+        if (next.y < groundY - 0.5 && Math.abs(calculatedVy) < 0.05 && Math.abs(calculatedVx) < 0.05) {
+          next = { ...next, vy: 0.25 };
+        }
+        return { ...prev, [tossedId]: next };
       });
+      tossWakeRef.current();
     }
 
     isWorkerDraggingConfirmedRef.current = false;
@@ -2045,22 +2204,7 @@ export default function App() {
       const animal = gameState.animals.find((a) => a.id === draggedAnimalId);
       
       const list = lastDragCoordsRef.current;
-      let calculatedVx = 0;
-      let calculatedVy = 0;
-      if (list.length >= 2) {
-        const first = list[0];
-        const last = list[list.length - 1];
-        const dt = Math.max(1, last.t - first.t);
-        calculatedVx = ((last.x - first.x) / dt) * 15;
-        calculatedVy = ((last.y - first.y) / dt) * 15;
-        
-        const speed = Math.sqrt(calculatedVx * calculatedVx + calculatedVy * calculatedVy);
-        const maxSpeed = 7.0;
-        if (speed > maxSpeed) {
-          calculatedVx = (calculatedVx / speed) * maxSpeed;
-          calculatedVy = (calculatedVy / speed) * maxSpeed;
-        }
-      }
+      const { vx: calculatedVx, vy: calculatedVy } = computeThrowVelocity(list);
 
       setDraggedAnimalId(null);
       justFinishedDraggingRef.current = true;
@@ -2076,8 +2220,14 @@ export default function App() {
               ...a,
               vx: calculatedVx,
               vy: calculatedVy,
-              angle: calculatedVx * 4,
+              groundY: resolveGroundY(a),
+              angle: shouldSpinTossedSprites(deviceKind)
+                ? Math.max(-TOSS_MAX_ANGLE, Math.min(TOSS_MAX_ANGLE, calculatedVx * 1.2))
+                : 0,
             };
+            if (next.y < next.groundY - 0.5 && Math.abs(calculatedVy) < 0.05 && Math.abs(calculatedVx) < 0.05) {
+              next = { ...next, vy: 0.25 };
+            }
             if (penTpl && canSpeciesUsePen(a.species, penTpl.penType)) {
               next = { ...next, penId: penTpl.id };
               setTimeout(() => {
@@ -2088,11 +2238,14 @@ export default function App() {
           }
           return a;
         });
-        return {
+        const nextState = {
           ...prev,
           animals: updated
         };
+        gameStateRef.current = nextState;
+        return nextState;
       });
+      tossWakeRef.current();
     }
   };
 
@@ -2203,7 +2356,8 @@ export default function App() {
   };
 
   const getBoyDist = (tgtX: number, tgtY: number) => {
-    return Math.sqrt(Math.pow(boyPosition.x - tgtX, 2) + Math.pow(boyPosition.y - tgtY, 2));
+    const b = boyPositionRef.current;
+    return Math.sqrt(Math.pow(b.x - tgtX, 2) + Math.pow(b.y - tgtY, 2));
   };
 
   const isBoyNear = (tgtX: number, tgtY: number) => {
@@ -2750,6 +2904,48 @@ export default function App() {
       experience: prev.experience + 20,
     }));
     triggerNotification(`🛋️ ${item?.nameRu ?? "Вещь"} появилась в комнате!`);
+    if (furnitureId === "max_wardrobe") {
+      triggerNotification("👕 Шкаф готов! Нажми на него — купи костюмы для Макса!");
+    }
+  };
+
+  const handleBuyMaxOutfit = (outfitId: string) => {
+    const outfit = getMaxOutfit(outfitId);
+    if (outfit.cost <= 0 || isMaxOutfitOwned(outfitId, gameState.maxOutfits)) return;
+
+    if (gameState.coins < outfit.cost) {
+      playSadSound();
+      triggerNotification("⚠️ Не хватает монет для этого костюма.");
+      return;
+    }
+    if (gameState.level < outfit.minLevel) {
+      playSadSound();
+      triggerNotification(`⚠️ Нужен уровень ${outfit.minLevel}!`);
+      return;
+    }
+
+    playCoinSound();
+    setGameState((prev) => ({
+      ...prev,
+      coins: prev.coins - outfit.cost,
+      maxOutfits: [...(prev.maxOutfits ?? []), outfitId],
+      activeMaxOutfit: outfitId,
+      experience: prev.experience + 15,
+    }));
+    triggerNotification(`👕 ${outfit.nameRu} куплен и уже на Максе!`);
+  };
+
+  const handleEquipMaxOutfit = (outfitId: string) => {
+    if (!isMaxOutfitOwned(outfitId, gameState.maxOutfits)) return;
+    if (gameState.activeMaxOutfit === outfitId) return;
+
+    playClickSound();
+    const outfit = getMaxOutfit(outfitId);
+    setGameState((prev) => ({
+      ...prev,
+      activeMaxOutfit: outfitId,
+    }));
+    triggerNotification(`👦 Макс надел: ${outfit.nameRu}!`);
   };
 
   const handleUnlocks = (locId: LocationId, cost: number, minLvl: number) => {
@@ -3261,15 +3457,14 @@ export default function App() {
 
             {/* STAGE CONTAINER WITH SMOOTH PERSPECTIVE SCROLLING */}
             <div
+              ref={stageElRef}
               id="scrolling-stage"
               className="absolute inset-0 select-none"
               style={{
-                transform: buildStageTransform(effectiveZoom, shiftX, shiftY, deviceKind),
-                transformOrigin: "left bottom",
+                transformOrigin: "left bottom" as const,
                 width: "100%",
                 height: "100%",
-                transition: "transform 220ms cubic-bezier(0.25, 0.8, 0.25, 1)",
-                willChange: isCompact ? "transform" : undefined,
+                willChange: isPhone ? undefined : "transform",
               }}
             >
               {/* 1. SKY CELESTIAL BODIES & LARGE LAYERED DRIFTING CLOUDS */}
@@ -3311,6 +3506,12 @@ export default function App() {
                   playClickSound();
                   setShowMaxHomeShop(true);
                   triggerNotification("🛋️ Роман-домовой: выбирай мебель для комнаты!");
+                }}
+                onOpenWardrobe={() => {
+                  if (!(gameState.buildings?.MAX_HOME || []).includes("max_wardrobe")) return;
+                  playClickSound();
+                  setShowMaxWardrobe(true);
+                  triggerNotification("👕 Шкаф Макса — покупай и меняй костюмы!");
                 }}
                 onImmersiveChange={setGameRoomImmersive}
               />
@@ -3492,10 +3693,10 @@ export default function App() {
               </div>
             )}
 
-            {/* UNIFIED BOTTOM HUD CONTROL BAR (Backpack and Shop placed nicely on brown subterranean soil strip) */}
-            <div className="absolute left-2 lg:left-4 right-2 lg:right-4 bottom-2 lg:bottom-2.5 z-30 flex items-center justify-between gap-2 lg:gap-4 pointer-events-none select-none">
+            {/* UNIFIED TOP HUD (рюкзак и лавка — полупрозрачные, не перекрывают игровое поле снизу) */}
+            <div className="absolute left-2 lg:left-4 right-2 lg:right-4 top-10 lg:top-11 z-30 flex items-center justify-between gap-2 lg:gap-4 pointer-events-none select-none">
               {/* Miniature Cartoon Backpack containing non-empty items (No letters, only images/emojis and count figures) */}
-              <div className="flex items-center gap-1 lg:gap-1.5 bg-[#FFF8DF]/95 border-2 border-[#7A4E31] p-0.5 lg:p-1 px-1.5 lg:px-2.5 rounded-full shadow-md pointer-events-auto max-w-[calc(100%-88px)] lg:max-w-[calc(100%-110px)] overflow-x-auto scrollbar-none scale-[0.92] lg:scale-100 origin-left" id="compact-backpack-hud">
+              <div className="flex items-center gap-1 lg:gap-1.5 bg-[#FFF8DF]/45 backdrop-blur-sm border-2 border-[#7A4E31]/35 p-0.5 lg:p-1 px-1.5 lg:px-2.5 rounded-full shadow-md pointer-events-auto max-w-[calc(100%-88px)] lg:max-w-[calc(100%-110px)] overflow-x-auto scrollbar-none scale-[0.92] lg:scale-100 origin-left" id="compact-backpack-hud">
                 <span className="text-xs lg:text-sm select-none" title="Твой Рюкзак">🎒</span>
                 {Object.keys(gameState.inventory).map((key) => {
                   const count = gameState.inventory[key];
@@ -3515,7 +3716,7 @@ export default function App() {
                   }
 
                   return (
-                    <div key={key} className="flex items-center gap-0.5 bg-white/70 px-2 py-0.5 rounded-full border border-amber-900/10 text-[9.5px] font-black text-[#5C3A21] shrink-0 transform transition-all active:scale-95" title={key}>
+                    <div key={key} className="flex items-center gap-0.5 bg-white/35 px-2 py-0.5 rounded-full border border-amber-900/10 text-[9.5px] font-black text-[#5C3A21] shrink-0 transform transition-all active:scale-95" title={key}>
                       <span className="text-xs leading-none select-none">{icon}</span>
                       <span className="leading-none">{count}</span>
                     </div>
@@ -3535,7 +3736,7 @@ export default function App() {
                     setShopActiveTab("sell");
                     setShowShopModal(true);
                   }}
-                  className="bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-600 hover:to-yellow-500 text-white rounded-full border-2 border-[#7A4E31] shadow-md flex items-center justify-center gap-0.5 active:scale-95 transform transition-all p-0.5 px-1.5 pointer-events-auto cursor-pointer select-none font-sans font-black text-[7px] uppercase tracking-wider shrink-0 leading-none scale-[0.82] origin-right"
+                  className="bg-gradient-to-r from-amber-500/75 to-yellow-400/75 hover:from-amber-600/90 hover:to-yellow-500/90 backdrop-blur-sm text-white rounded-full border-2 border-[#7A4E31]/45 shadow-md flex items-center justify-center gap-0.5 active:scale-95 transform transition-all p-0.5 px-1.5 pointer-events-auto cursor-pointer select-none font-sans font-black text-[7px] uppercase tracking-wider shrink-0 leading-none scale-[0.82] origin-right"
                   id="floating-market-btn"
                 >
                   <span className="text-xs leading-none select-none">🏪</span>
@@ -4075,41 +4276,58 @@ export default function App() {
                   key={animal.id}
                   type="button"
                   onPointerDown={(e) => handleAnimalPointerDown(e, animal.id, animal.species)}
-                  className={`absolute w-24 h-24 origin-bottom select-none z-10 interactive-element touch-none ${
+                  className={`absolute select-none z-10 interactive-element touch-none border-0 bg-transparent p-0 outline-none focus:outline-none ${
                     isDragged
-                      ? "transition-none scale-135 filter drop-shadow-[0_12px_12px_rgba(251,191,36,0.95)] brightness-110 z-50 cursor-grabbing"
+                      ? "z-50 cursor-grabbing"
                       : isSelected
-                      ? "transition-transform duration-500 scale-125 filter drop-shadow-[0_8px_8px_rgba(251,191,36,0.9)] brightness-105"
-                      : "transition-transform duration-500 hover:scale-110 cursor-pointer filter drop-shadow"
+                      ? "cursor-pointer"
+                      : "cursor-pointer"
                   }`}
                   style={{
                     left: `${animal.x}%`,
                     top: `${animal.y}%`,
-                    transform: `translate(-50%, -100%) scaleX(${animal.scaleX}) rotate(${animal.angle || 0}deg)`
+                    transform: "translate(-50%, -100%)",
                   }}
                   id={`roamer-${animal.id}`}
                 >
                   {!animal.isFed ? (
-                    <span className="absolute -top-7 left-1/2 transform -translate-x-1/2 bg-rose-50 text-rose-600 rounded-full px-2 py-0.5 text-[8.5px] border-2 border-rose-300 font-black shadow-md animate-bounce whitespace-nowrap uppercase z-20">
+                    <span className="absolute -top-7 left-1/2 -translate-x-1/2 bg-rose-50 text-rose-600 rounded-full px-2 py-0.5 text-[8.5px] border-2 border-rose-300 font-black shadow-md animate-bounce whitespace-nowrap uppercase z-20 pointer-events-none">
                       😋 Покорми!
                     </span>
                   ) : animal.productionProgress >= 100 ? (
-                    <span className="absolute -top-7 left-1/2 transform -translate-x-1/2 bg-yellow-400 text-amber-950 rounded-full px-2 py-0.5 text-[8.5px] border-2 border-yellow-600 font-black shadow-md animate-pulse whitespace-nowrap uppercase z-20">
+                    <span className="absolute -top-7 left-1/2 -translate-x-1/2 bg-yellow-400 text-amber-950 rounded-full px-2 py-0.5 text-[8.5px] border-2 border-yellow-600 font-black shadow-md animate-pulse whitespace-nowrap uppercase z-20 pointer-events-none">
                       {template.productIcon} Готово!
                     </span>
                   ) : isNight ? (
-                    <span className="absolute -top-7 left-1/2 transform -translate-x-1/2 bg-indigo-950 text-sky-200 border-2 border-indigo-400 rounded-full px-2 py-0.5 text-[8px] font-black shadow-md animate-bounce select-none whitespace-nowrap uppercase z-20">
+                    <span className="absolute -top-7 left-1/2 -translate-x-1/2 bg-indigo-950 text-sky-200 border-2 border-indigo-400 rounded-full px-2 py-0.5 text-[8px] font-black shadow-md animate-bounce select-none whitespace-nowrap uppercase z-20 pointer-events-none">
                       💤 Спит...
                     </span>
                   ) : null}
 
                   {animal.isSheared && (
-                    <span className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 bg-pink-100 text-pink-700 rounded-full px-1.5 py-0.2 text-[8px] font-black border border-pink-300 whitespace-nowrap">
-                      лысый барашек
-                    </span>
+                    <>
+                      <span className="absolute -top-10 left-1/2 -translate-x-1/2 bg-rose-50 text-rose-700 rounded-full px-1.5 py-0.5 text-[8px] font-black border border-rose-300 whitespace-nowrap z-20 pointer-events-none">
+                        Вай, холодно!
+                      </span>
+                      <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-pink-100 text-pink-700 rounded-full px-1.5 py-0.2 text-[8px] font-black border border-pink-300 whitespace-nowrap pointer-events-none">
+                        {animal.customName}
+                      </span>
+                    </>
                   )}
 
-                  <div className={`w-24 h-24 pointer-events-none transition-all duration-1000 ${isNight ? "brightness-50 saturate-75 contrast-90" : ""}`}>
+                  <div
+                    data-animal-sprite
+                    className={`w-24 h-24 origin-bottom pointer-events-none ${
+                      isDragged
+                        ? "scale-135 filter drop-shadow-[0_12px_12px_rgba(251,191,36,0.95)] brightness-110"
+                        : isSelected
+                        ? "scale-125 filter drop-shadow-[0_8px_8px_rgba(251,191,36,0.9)] brightness-105"
+                        : "filter drop-shadow"
+                    } ${isNight ? "brightness-50 saturate-75 contrast-90" : ""}`}
+                    style={{
+                      transform: `rotate(${animal.angle || 0}deg) scaleX(${animal.scaleX})`,
+                    }}
+                  >
                     <AnimalSVG
                       species={animal.species}
                       happiness={animal.happiness}
@@ -4191,19 +4409,18 @@ export default function App() {
 
             {/* F. MAXIM — custom sprite (public/assets/characters/maxim/idle.png) */}
             <div
-              className="absolute w-16 h-20 z-20 pointer-events-none select-none transition-all duration-[40ms]"
-              style={{
-                left: `${boyPosition.x}%`,
-                top: `${boyPosition.y}%`,
-                transform: `translate(-50%, -100%) scaleX(${boyPosition.dir === "left" ? -1 : 1})`
-              }}
+              ref={maxElRef}
+              className="absolute w-16 h-20 z-20 pointer-events-none select-none"
             >
-              <div className={`relative flex flex-col items-center ${boyPosition.isMoving ? "animate-walk-wobble" : ""}`}>
+              <div ref={maxWobbleElRef} className="relative flex flex-col items-center">
                 <img
-                  src="/assets/characters/maxim/idle.png"
+                  src={getMaxOutfitSpriteSrc(gameState.activeMaxOutfit)}
                   alt="Максим"
-                  className="w-16 h-20 object-contain object-bottom filter drop-shadow-md"
+                  className={`w-16 h-20 object-contain object-bottom ${isPhone ? "" : "filter drop-shadow-md"}`}
                   draggable={false}
+                  loading={isPhone ? "lazy" : "eager"}
+                  decoding="async"
+                  key={gameState.activeMaxOutfit ?? "default"}
                 />
 
                 {/* Feet shadow */}
@@ -4255,21 +4472,21 @@ export default function App() {
                 <button
                   key={worker.id}
                   type="button"
+                  id={`worker-roamer-${worker.id}`}
                   onPointerDown={(e) => handleWorkerPointerDown(e, worker.id)}
-                  className={`absolute w-16 h-18 z-20 pointer-events-auto cursor-pointer select-none interactive-element touch-none transition-all duration-[40ms] ${
+                  className={`absolute z-20 pointer-events-auto cursor-pointer select-none interactive-element touch-none border-0 bg-transparent p-0 outline-none focus:outline-none ${
                     isDragged
-                      ? "scale-125 brightness-110 z-50 cursor-grabbing filter drop-shadow-[0_12px_12px_rgba(251,191,36,0.95)]"
+                      ? "z-50 cursor-grabbing"
                       : ""
                   }`}
                   style={{
                     left: `${posX}%`,
                     top: `${posY}%`,
-                    transform: `translate(-50%, -100%) scaleX(${dir === "left" ? -1 : 1}) rotate(${tossAngle}deg)`
+                    transform: "translate(-50%, -100%)",
                   }}
                 >
                   <div className={`relative flex flex-col items-center ${isMoving ? "animate-walk-wobble" : ""}`}>
-                    {/* Bubbled tooltip detailing what they are doing! */}
-                    <div className="absolute -top-7 px-1.5 py-0.5 bg-slate-900 border border-slate-600 text-slate-50 rounded-full text-[8px] font-black shadow-md flex items-center gap-1 whitespace-nowrap uppercase tracking-wider" style={{ transform: `scaleX(${dir === "left" ? -1 : 1})` }}>
+                    <div className="absolute -top-7 px-1.5 py-0.5 bg-slate-900 border border-slate-600 text-slate-50 rounded-full text-[8px] font-black shadow-md flex items-center gap-1 whitespace-nowrap uppercase tracking-wider pointer-events-none">
                       <span>{worker.emoji}</span>
                       <span className={worker.id === "worker-fyodor" ? "normal-case" : ""}>
                         {worker.id === "worker-fyodor"
@@ -4279,15 +4496,24 @@ export default function App() {
                       <span className="text-[10px] animate-bounce">{actionIcon}</span>
                     </div>
 
-                    {/* Pop up Action Status bubble */}
                     {actionLabel && (
-                      <div className="absolute -top-13 px-2 py-0.5 bg-amber-50 border-2 border-amber-500 text-amber-950 rounded-xl text-[8.5px] font-black shadow-lg flex items-center gap-1 whitespace-nowrap animate-bounce z-40" style={{ transform: `scaleX(${dir === "left" ? -1 : 1})` }}>
+                      <div className="absolute -top-13 px-2 py-0.5 bg-amber-50 border-2 border-amber-500 text-amber-950 rounded-xl text-[8.5px] font-black shadow-lg flex items-center gap-1 whitespace-nowrap animate-bounce z-40 pointer-events-none">
                         {actionLabel}
                       </div>
                     )}
 
-                    <div className="w-16 h-18">
-                      <WorkerSVG workerId={worker.id} />
+                    <div
+                      data-worker-sprite
+                      className={`w-16 h-20 origin-bottom ${
+                        isDragged
+                          ? "scale-125 brightness-110 filter drop-shadow-[0_12px_12px_rgba(251,191,36,0.95)]"
+                          : "filter drop-shadow-md"
+                      }`}
+                      style={{
+                        transform: `rotate(${tossAngle}deg) scaleX(${dir === "left" ? -1 : 1})`,
+                      }}
+                    >
+                      <WorkerSVG workerId={worker.id} className="w-16 h-20" />
                     </div>
 
                     {/* Ground shadow for physical depth */}
@@ -5250,6 +5476,18 @@ export default function App() {
         />
       )}
 
+      {showMaxWardrobe && activeZone === "MAX_HOME" && !gameRoomImmersive && (
+        <MaxWardrobeModal
+          coins={gameState.coins}
+          level={gameState.level}
+          purchasedOutfitIds={gameState.maxOutfits ?? []}
+          activeOutfitId={gameState.activeMaxOutfit ?? "default"}
+          onBuy={handleBuyMaxOutfit}
+          onEquip={handleEquipMaxOutfit}
+          onClose={() => setShowMaxWardrobe(false)}
+        />
+      )}
+
       {/* Help Instructions popup Overlay */}
       {showHelp && !gameRoomImmersive && (
         <HelpOverlay onClose={() => setShowHelp(false)} />
@@ -5257,8 +5495,8 @@ export default function App() {
 
       {/* Floating brief action banner feedback */}
       {customNotification && !gameRoomImmersive && (
-        <div className="fixed bottom-4 lg:bottom-6 left-1/2 transform -translate-x-1/2 bg-[#FFFBEB] text-[#92400E] text-[10px] lg:text-sm font-black p-2 px-4 lg:p-3.5 lg:px-6 rounded-2xl lg:rounded-3xl shadow-2xl border-2 lg:border-4 border-[#92400E] z-50 animate-bounce-slow flex items-center gap-1.5 lg:gap-2 max-w-[92vw]" id="live-notification">
-          <span className="text-base lg:text-xl animate-spin-slow">🌟</span>
+        <div className="fixed top-14 sm:top-16 lg:top-[4.25rem] left-1/2 transform -translate-x-1/2 bg-[#FFFBEB]/50 backdrop-blur-md text-[#92400E] text-[10px] lg:text-sm font-black p-2 px-4 lg:p-2.5 lg:px-5 rounded-2xl lg:rounded-3xl shadow-lg border-2 lg:border-[3px] border-[#92400E]/35 z-50 flex items-center gap-1.5 lg:gap-2 max-w-[92vw] pointer-events-none" id="live-notification">
+          <span className="text-base lg:text-lg opacity-80">🌟</span>
           <span>{customNotification}</span>
         </div>
       )}

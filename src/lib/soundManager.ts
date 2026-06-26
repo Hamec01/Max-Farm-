@@ -7,6 +7,7 @@ import {
   getMuteState,
   setMuteState as setMuteStateBase,
   getAudioContext,
+  unlockAudioContext,
   stopActiveSynthSounds,
 } from "./audio";
 
@@ -84,8 +85,7 @@ function loadVoicesOnce() {
 /** Разблокировка аудио после первого клика (браузерное правило) */
 export function unlockAudio() {
   loadVoicesOnce();
-  const ctx = getAudioContext();
-  ctx?.resume();
+  unlockAudioContext();
 }
 
 /** Остановить звук животного + детское имя (переключение без наслоения) */

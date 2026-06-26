@@ -234,6 +234,10 @@ export interface PlayerState {
   workers?: WorkerInstance[]; // hireable helper worker units
   pens?: PenState[];
   maxHouseLevel?: number; // Level of Max's house
+  /** Купленные наряды Макса (кроме стартового default) */
+  maxOutfits?: string[];
+  /** Активный наряд на поле */
+  activeMaxOutfit?: string;
   day?: number; // current gameplay day
   dayProgress?: number; // current ticks elapsed in this day
 }
