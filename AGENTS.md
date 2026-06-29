@@ -1,93 +1,131 @@
 # AGENTS.md
 
-## Purpose
+## 1. Назначение файла
 
-This file defines the working rules for coding agents in **Max Farm / «Ферма Макса»**.
+Этот файл является основной инструкцией для AI-агентов, работающих над проектом **«Ферма Макса» / Max Farm**.
 
-The project is being rewritten from the current React/DOM prototype into a maintainable **Phaser + TypeScript** game. Preserve the game itself, but do not preserve fragile implementation patterns from the legacy runtime.
+Агент обязан прочитать этот файл до любых изменений в коде. Правила действуют для всего репозитория, если внутри отдельной папки нет более специфичного `AGENTS.md`.
 
-These instructions apply to the whole repository unless a deeper directory contains its own `AGENTS.md` with more specific rules.
+Главная задача — полностью переписать существующий React/DOM-прототип на устойчивую архитектуру **Phaser + TypeScript**, сохранив игру, контент, визуальный стиль и прогресс игрока, но не сохраняя проблемную старую реализацию.
 
----
-
-## Product vision
-
-Max Farm is a calm, colorful 2D side-view farm game for children approximately **2–7 years old**.
-
-Primary targets:
-
-1. phones;
-2. tablets;
-3. desktop browsers.
-
-Core experience:
-
-- Max walks left and right through long illustrated locations;
-- the camera follows Max horizontally;
-- animals and workers make the world feel alive;
-- the player feeds animals, collects products, plants crops, hires workers, buys upgrades, earns coins and XP, and unlocks content;
-- interactions must be simple, forgiving, readable, and pleasant for a young child;
-- saves must survive refreshes, app backgrounding, and ordinary browser interruptions.
-
-Do not turn the project into a generic farming framework. Build the concrete game described by the repository content.
+Агент должен вести разработку от первого технического каркаса до готовой браузерной версии игры, проходя этапы последовательно.
 
 ---
 
-## Rewrite policy
+## 2. Видение продукта
 
-The current React version is a **legacy reference implementation**.
+«Ферма Макса» — спокойная, яркая, добрая 2D-игра с боковым видом для детей примерно **2–7 лет**.
 
-Preserve:
+Приоритет платформ:
 
-- gameplay concepts and progression;
-- locations and their intended order;
-- animal species;
-- workers and their roles;
-- upgrades and prices unless a task explicitly changes balance;
-- Max outfits;
-- existing PNG/SVG/audio assets that are suitable;
-- meaningful save data through an explicit migration layer;
-- child-friendly visual identity.
+1. мобильные телефоны;
+2. планшеты;
+3. настольные браузеры.
 
-Do not preserve:
+Основной игровой опыт:
 
-- the giant `App.tsx` architecture;
-- DOM nodes as game entities;
-- React state as the frame-by-frame simulation engine;
-- direct DOM mutation for movement;
-- multiple competing animation loops;
-- gameplay based on `setInterval` or device-dependent ticks;
-- hidden mutations of nested state;
-- hardcoded worker logic spread across large switch statements;
-- viewport-percentage coordinates as canonical world coordinates;
-- save logic that writes incomplete or transient state.
+- Макс ходит влево и вправо по длинным рисованным локациям;
+- камера следует за Максом по горизонтали;
+- животные гуляют, едят, реагируют и производят продукты;
+- работники выполняют полезные задачи и оживляют ферму;
+- игрок покупает животных, работников и улучшения;
+- игрок получает монеты, опыт и новые уровни;
+- открываются новые локации и механики;
+- прогресс надёжно сохраняется;
+- управление понятно ребёнку без необходимости читать длинные тексты.
 
-When legacy behavior conflicts with correctness, deterministic simulation, mobile stability, or these instructions, implement the corrected behavior and document the difference.
+Игра не должна превращаться в абстрактный движок фермы. Нужно создавать конкретную игру, уже описанную существующим контентом репозитория.
 
 ---
 
-## Required technology direction
+## 3. Что сохраняем при переписывании
 
-Use:
+Необходимо сохранить:
 
-- **Phaser 4.2.0**, pinned to the exact version unless the owner explicitly approves an upgrade;
-- TypeScript in strict mode;
-- Vite for development and production builds;
-- Phaser Arcade Physics only where collision or velocity handling is genuinely useful;
-- browser storage behind a repository-owned persistence adapter;
-- data-driven content definitions.
+- концепцию и настроение игры;
+- Макса и его костюмы;
+- существующие локации и предполагаемый порядок открытия;
+- виды животных;
+- работников, их имена и роли;
+- покупки;
+- улучшения и навыки;
+- монеты, опыт, уровни и прогрессию;
+- грядки, деревья и продукты;
+- дом Макса;
+- рисовалку;
+- пазлы;
+- существующие подходящие PNG, SVG и аудио;
+- полезные данные старого сохранения через миграцию;
+- детскую визуальную стилистику.
 
-Do not add React back into the gameplay runtime. A separate web shell or admin tool may use React only after an explicit project decision.
+Разрешается исправлять старое поведение, если оно:
 
-Do not introduce a full ECS framework. This game is better served by small entity classes, focused systems, scenes, and typed domain state.
+- вызывает баги;
+- зависит от частоты кадров или устройства;
+- приводит к двойным наградам;
+- ломает сохранения;
+- плохо работает на телефонах;
+- противоречит правилам этого файла.
 
-Avoid new runtime dependencies unless they solve a clear problem that cannot be handled simply inside the project.
+Каждое осознанное отличие от старой версии должно быть отражено в описании коммита или итоговом отчёте.
 
 ---
 
-## Intended source layout
+## 4. Что запрещено переносить из старой архитектуры
 
-Prefer this structure as the rewrite develops:
+Нельзя переносить:
+
+- гигантский `App.tsx` как центр всей игры;
+- React state как игровой цикл;
+- HTML-элементы как игровые сущности;
+- прямое изменение DOM для движения;
+- несколько конкурирующих `requestAnimationFrame`;
+- отдельные интервалы для животных и работников;
+- игровую скорость, зависящую от количества тиков;
+- скрытую мутацию вложенных объектов состояния;
+- огромные `switch` по ID работников;
+- проценты экрана как канонические мировые координаты;
+- растягивание фона через `100% 100%`;
+- сохранение только части состояния;
+- запись Phaser-объектов в сохранение;
+- UI, рассчитанный только на мышь и клавиатуру.
+
+Старый код — источник информации о механиках и контенте, но не архитектурный образец.
+
+---
+
+## 5. Обязательный технологический стек
+
+Использовать:
+
+- **Phaser 4.2.0**, закреплённый точной версией;
+- TypeScript со строгими настройками;
+- Vite;
+- Phaser Scale Manager;
+- Phaser Arcade Physics только там, где действительно нужны скорость или столкновения;
+- Vitest или эквивалентный лёгкий тестовый раннер;
+- Playwright для ключевых браузерных сценариев;
+- локальное сохранение за собственным адаптером репозитория.
+
+Не добавлять React в игровой runtime.
+
+Отдельная административная панель в будущем может использовать React только после прямого решения владельца проекта.
+
+Не добавлять тяжёлый ECS-фреймворк. Для этой игры предпочтительны:
+
+- небольшие классы сущностей;
+- игровые системы;
+- сцены;
+- типизированное доменное состояние;
+- конфигурационные файлы контента.
+
+Новая зависимость добавляется только при понятной необходимости.
+
+---
+
+## 6. Целевая структура проекта
+
+Предпочтительная структура:
 
 ```text
 src/
@@ -101,6 +139,9 @@ src/
       PreloadScene.ts
       WorldScene.ts
       UIScene.ts
+      HomeScene.ts
+      DrawingScene.ts
+      PuzzleScene.ts
     entities/
       Max.ts
       Animal.ts
@@ -111,8 +152,11 @@ src/
       InteractionSystem.ts
       AnimalSystem.ts
       WorkerSystem.ts
-      ProgressionSystem.ts
+      TaskSystem.ts
+      CropSystem.ts
       EconomySystem.ts
+      ProgressionSystem.ts
+      UpgradeSystem.ts
       TimeSystem.ts
       AudioSystem.ts
       SaveSystem.ts
@@ -122,294 +166,503 @@ src/
       events/
       selectors/
       migrations/
+      validation/
     content/
       locations/
       animals/
       workers/
       upgrades/
       items/
+      crops/
+      puzzles/
     input/
       InputController.ts
       TouchController.ts
     ui/
       components/
+      panels/
       layout/
     persistence/
       SaveRepository.ts
       LocalStorageSaveRepository.ts
     assets/
       AssetManifest.ts
+      AssetValidator.ts
   styles/
   tests/
 ```
 
-The exact tree may evolve, but keep the same separation of responsibilities.
+Структура может уточняться, но нельзя снова объединять игру, UI, сохранение и симуляцию в один файл.
 
 ---
 
-## Architecture rules
+## 7. Основные архитектурные правила
 
-### One authoritative game state
+### 7.1. Единственное авторитетное состояние
 
-There must be one canonical serializable domain state for progression and persistent world data.
+В игре должно существовать одно каноническое сериализуемое доменное состояние.
 
-Examples of persistent state:
+Оно содержит:
 
-- coins;
-- XP and level;
-- unlocked locations;
-- inventory;
-- owned animals;
-- animal needs and production state;
-- crops and trees;
-- owned upgrades;
-- hired workers;
-- Max outfit;
-- relevant world-object state;
-- simulation timestamps;
-- settings that belong to the save.
+- монеты;
+- опыт и уровень;
+- текущую и открытые локации;
+- положение Макса;
+- инвентарь;
+- животных;
+- потребности животных;
+- продукты;
+- загоны;
+- работников;
+- задачи работников;
+- грядки;
+- деревья;
+- улучшения;
+- костюм Макса;
+- настройки сохранения;
+- временные отметки симуляции.
 
-Examples of transient runtime state that should normally not be saved:
+Оно не содержит:
 
-- Phaser sprite instances;
-- tweens;
-- textures;
-- scene references;
-- pointer objects;
-- temporary speech bubbles;
-- animation frame counters;
-- cached layout values;
-- active sound objects.
+- Phaser Sprite;
+- Phaser Scene;
+- Tween;
+- Texture;
+- Pointer;
+- Sound instance;
+- DOM-узлы;
+- временные визуальные эффекты;
+- ссылки на игровые объекты.
 
-Never store Phaser objects inside domain state.
+### 7.2. Команды изменяют состояние
 
-### Commands change state
+Изменения выполняются через типизированные команды или сфокусированные доменные методы.
 
-Gameplay changes should be expressed as typed commands or focused domain methods, for example:
+Примеры:
 
-- `MOVE_MAX`
-- `BUY_ANIMAL`
-- `FEED_ANIMAL`
-- `COLLECT_PRODUCT`
-- `PLANT_CROP`
-- `HARVEST_CROP`
-- `HIRE_WORKER`
-- `BUY_UPGRADE`
-- `CHANGE_LOCATION`
+```text
+MOVE_MAX
+CHANGE_LOCATION
+BUY_ANIMAL
+FEED_ANIMAL
+CLEAN_ANIMAL
+COLLECT_PRODUCT
+PLANT_CROP
+WATER_CROP
+HARVEST_CROP
+HIRE_WORKER
+BUY_UPGRADE
+CHANGE_OUTFIT
+SELL_ITEM
+```
 
-A command validates its preconditions, changes the canonical state, and emits domain events.
+Команда обязана:
 
-### Events drive presentation
+1. проверить предусловия;
+2. выполнить изменение ровно один раз;
+3. вернуть понятный результат;
+4. создать доменные события;
+5. не зависеть от UI-компонента.
 
-Visuals and audio react to domain events such as:
+### 7.3. События управляют представлением
 
-- `CoinsChanged`
-- `XpGained`
-- `LevelUp`
-- `AnimalFed`
-- `ProductCollected`
-- `WorkerTaskStarted`
-- `WorkerTaskCompleted`
-- `LocationUnlocked`
+Примеры событий:
 
-Do not make UI components independently modify overlapping pieces of game state.
+```text
+CoinsChanged
+XpGained
+LevelUp
+AnimalFed
+AnimalBecameHungry
+ProductReady
+ProductCollected
+WorkerTaskStarted
+WorkerTaskCompleted
+CropReady
+UpgradePurchased
+LocationUnlocked
+SaveFailed
+```
 
-### Systems remain focused
+UI, звук и анимация реагируют на события, но не создают независимые копии игрового состояния.
 
-Each system must have one clear responsibility. Avoid systems that both simulate gameplay, manipulate menus, load assets, save data, and play audio.
+### 7.4. Системы имеют одну ответственность
 
-### Prefer composition
+Нельзя создавать систему, которая одновременно:
 
-Use small components and helpers instead of deep inheritance trees. Shared behavior should be composed through typed collaborators.
+- двигает сущности;
+- открывает меню;
+- загружает ассеты;
+- сохраняет игру;
+- начисляет деньги;
+- проигрывает звук.
 
----
-
-## World and camera rules
-
-The outdoor game is a horizontal side-view world.
-
-- Outdoor movement is left/right only.
-- Outdoor gameplay must not depend on free vertical movement.
-- Use world pixel coordinates as the source of truth.
-- Each location defines explicit world bounds and a ground line or allowed movement segment.
-- Preserve the natural aspect ratio of illustrated backgrounds.
-- Do not stretch backgrounds with `100% 100%`.
-- The camera follows Max horizontally and is clamped to location bounds.
-- Use `Phaser.Scale.FIT` and `Phaser.Scale.CENTER_BOTH`.
-- Default logical game size: **1280 × 720** unless a measured implementation need proves otherwise.
-- Support safe areas and browser UI on mobile devices.
-- UI must remain screen-space UI and must not drift with the world camera.
-
-Large locations should feel wider on phones, not squeezed into one screen. The phone viewport shows a smaller portion of the same world and the camera travels through it.
-
----
-
-## Simulation and time
-
-All simulation must be based on elapsed time, not the number of timer callbacks.
-
-Rules:
-
-- use Phaser scene update time or a controlled fixed-step simulation;
-- convert milliseconds explicitly;
-- clamp unusually large deltas after tab restoration;
-- use timestamps for crops, production, hunger, and offline progress where appropriate;
-- do not make progression faster or slower because a phone uses a different update interval;
-- do not run independent intervals for every animal or worker;
-- pause or reduce nonessential simulation when the page is hidden;
-- restore safely after `visibilitychange`, `pagehide`, and mobile app backgrounding.
-
-XP processing must support gaining multiple levels from a single reward. Use a loop, not a single conditional level-up check.
-
-Random behavior must be controllable in tests. Inject or wrap randomness rather than calling `Math.random()` throughout domain code.
+Каждая система должна быть понятной и тестируемой отдельно.
 
 ---
 
-## Animals
+## 8. Мир, размеры и камера
 
-Animals are data-driven entities with reusable behavior.
+Уличные локации — горизонтальный 2D-мир.
 
-An animal definition should describe at least:
+Обязательные правила:
 
-- species ID;
-- display name;
-- preferred location or pen type;
-- purchase price;
-- product and production duration;
-- hunger/cleanliness rules;
-- movement characteristics;
-- available visual states;
-- sprite or fallback asset keys;
-- sound keys where available.
+- Макс ходит только влево и вправо;
+- свободное вертикальное перемещение на улице не используется;
+- мировые координаты задаются в пикселях;
+- у каждой локации есть ширина, высота, границы и линия земли;
+- фон сохраняет исходное соотношение сторон;
+- фон не растягивается под размер устройства;
+- камера следует за Максом только по горизонтали;
+- камера ограничена границами локации;
+- UI находится в экранных координатах и не двигается вместе с камерой;
+- использовать `Phaser.Scale.FIT`;
+- использовать `Phaser.Scale.CENTER_BOTH`;
+- базовый логический размер — `1280 × 720`, пока реальные тесты не докажут необходимость другого;
+- учитывать safe area мобильных устройств.
 
-Runtime behavior may include:
-
-- idle;
-- wander;
-- approach food;
-- eat;
-- produce;
-- happy reaction;
-- hungry reaction;
-- dirty reaction;
-- sleep or rest where relevant.
-
-Do not create a separate custom simulation loop for each species. Special species behavior should be implemented through small typed strategies or configuration.
-
-When an asset is missing, use an intentional SVG placeholder or approved fallback. Never silently display an unrelated species.
+На телефоне локация должна казаться длиннее за счёт меньшего видимого участка, а не сжиматься целиком в экран.
 
 ---
 
-## Workers
+## 9. Время и симуляция
 
-Workers must use a small state machine instead of a giant ID-based switch statement.
+Вся симуляция строится на реально прошедшем времени.
 
-Recommended states:
+Нельзя:
+
+- увеличивать игровой день на единицу за каждый таймер;
+- считать, что один callback равен одной секунде;
+- создавать отдельный interval для каждой сущности;
+- ускорять игру на мощных устройствах;
+- замедлять игру на слабых устройствах.
+
+Нужно:
+
+- использовать `deltaMs`;
+- явно указывать единицы времени;
+- ограничивать слишком большой delta после возвращения вкладки;
+- хранить временные отметки для производства и роста;
+- использовать внедряемые часы в тестах;
+- обрабатывать `visibilitychange` и `pagehide`;
+- рассчитывать офлайн-прогресс формулами, а не симуляцией каждого кадра отсутствия.
+
+Начисление опыта должно поддерживать несколько повышений уровня за одну большую награду.
+
+Случайность должна быть заменяемой в тестах. Не разбрасывать `Math.random()` по игровому коду.
+
+---
+
+## 10. Правила животных
+
+Животные описываются данными.
+
+Определение вида должно содержать:
+
+- ID;
+- имя;
+- цену;
+- необходимый уровень;
+- тип подходящего загона;
+- продукт;
+- длительность производства;
+- скорость голода;
+- правила чистоты;
+- скорость движения;
+- допустимую область движения;
+- список визуальных состояний;
+- ключи спрайтов;
+- ключи звуков.
+
+Общие состояния:
+
+```text
+idle
+wander
+hungry
+approach-food
+eating
+happy
+dirty
+producing
+ready-to-collect
+sleeping
+```
+
+Не создавать отдельный цикл симуляции для каждого вида.
+
+Особое поведение оформляется небольшой конфигурацией или стратегией.
+
+Если изображения нет, использовать явно обозначенный временный SVG. Нельзя показывать вместо отсутствующего животного другой вид.
+
+---
+
+## 11. Загоны
+
+Каждый загон имеет:
+
+- ID;
+- расположение;
+- разрешённые виды;
+- вместимость;
+- уровень;
+- область движения;
+- состояние чистоты;
+- кормушку;
+- место сбора продукта;
+- список животных.
+
+Животные не должны бесконтрольно ходить по всей карте.
+
+Покупка животного проверяет:
+
+- открыт ли вид;
+- достаточно ли монет;
+- существует ли подходящий загон;
+- есть ли свободное место;
+- не выполняется ли уже эта покупка.
+
+---
+
+## 12. Работники и система задач
+
+Работники используют общий конечный автомат:
 
 ```text
 idle
 choose-task
+reserve-target
 walk-to-target
 work
+complete-task
 return
 rest
 blocked
 ```
 
-Worker definitions contain identity, role, price, unlock conditions, movement speed, visual asset, and capabilities.
+Определение работника содержит:
 
-Worker AI must:
+- ID;
+- имя;
+- профессию;
+- цену;
+- необходимый уровень;
+- скорость;
+- способности;
+- ключ ассета;
+- доступные фразы или звуки.
 
-- choose from valid tasks;
-- reserve a task or target when necessary;
-- release reservations when interrupted;
-- avoid duplicating the same reward;
-- fail safely if a target disappears;
-- use shared movement and work logic;
-- remain deterministic enough to reproduce bugs.
+Работники выбирают задачи из центральной системы.
 
-Workers should look alive but must not consume excessive CPU on mobile devices. Use low-frequency decision-making and normal frame-based movement.
-
----
-
-## Input rules
-
-The game is touch-first.
-
-Required principles:
-
-- a normal tap performs the primary action;
-- visible buttons are preferred over hidden gestures;
-- touch targets should normally be at least 48 logical pixels;
-- important actions need generous hit areas;
-- dragging and camera gestures must not accidentally trigger purchases;
-- double tap may replace desktop modifier-click behavior only when clearly appropriate;
-- long press is reserved for optional secondary information, not essential progress;
-- keyboard controls are supported on desktop but must not be required;
-- pointer input should be handled through one input controller, not scattered across entities.
-
-For a game aimed at young children, avoid tiny labels, dense menus, ambiguous icons, and actions that require precise timing.
-
-Purchases and destructive actions should use a simple, readable confirmation pattern when accidental activation would be frustrating.
-
----
-
-## UI and child experience
-
-Design for a child who may not read fluently.
-
-- Prefer recognizable icons plus short labels.
-- Use large controls and clear visual feedback.
-- Keep one primary decision per panel.
-- Avoid overlapping windows.
-- Avoid information-dense desktop dashboards on phones.
-- Show cause and effect immediately: item moves, animal reacts, sound plays, counter changes.
-- Keep failure gentle. Do not punish a child for slow input.
-- Never use dark patterns, artificial urgency, loot-box behavior, or accidental-spend traps.
-- Do not add advertising, analytics, external accounts, or network tracking without an explicit owner request.
-
-The game must remain usable without audio. Important feedback needs a visual equivalent.
-
----
-
-## Assets
-
-Existing assets are valuable project content.
-
-Before adding a replacement:
-
-1. inspect the asset manifest and public asset folders;
-2. check whether an equivalent PNG, SVG, or audio file already exists;
-3. verify dimensions and transparency;
-4. use a stable semantic key;
-5. preload every state that can appear during gameplay.
-
-Asset requirements:
-
-- preserve source aspect ratio;
-- avoid runtime paths assembled from unvalidated user-facing names;
-- centralize keys and paths in an asset manifest;
-- use lowercase kebab-case file names for new assets;
-- do not overwrite original art just to resize it;
-- optimize large textures for mobile memory without destroying the source file;
-- document any generated fallback asset;
-- never count a failed preload as a successful load;
-- display a controlled fallback and log enough detail to diagnose missing assets.
-
-Missing final artwork should not block architecture work. Add a clearly named temporary SVG placeholder and keep replacement easy.
-
----
-
-## Saving and migrations
-
-Every save document must include a schema version.
-
-Recommended envelope:
+Пример задачи:
 
 ```ts
-interface SaveGameV2 {
-  schemaVersion: 2;
-  savedAt: string;
+interface FarmTask {
+  id: string;
+  type: FarmTaskType;
+  targetId: string;
+  priority: number;
+  createdAtMs: number;
+  reservedByWorkerId?: string;
+}
+```
+
+Типы задач:
+
+```text
+feed-animal
+clean-pen
+collect-product
+water-crop
+harvest-crop
+carry-item
+```
+
+Обязательные правила:
+
+- задача резервируется одним работником;
+- награда выдаётся один раз;
+- резервирование снимается при отмене;
+- исчезнувшая цель не ломает AI;
+- два работника не собирают один продукт;
+- принятие решений выполняется реже, чем движение;
+- worker AI не должен нагружать телефон покадровыми тяжёлыми поисками.
+
+---
+
+## 13. Покупки, экономика и улучшения
+
+Все цены и награды хранятся в content-файлах.
+
+UI не имеет права напрямую уменьшать монеты или добавлять предметы.
+
+Покупка проверяет:
+
+- количество монет;
+- уровень игрока;
+- условия открытия;
+- вместимость;
+- максимальный уровень улучшения;
+- повторное нажатие;
+- допустимость размещения.
+
+Улучшения описываются данными:
+
+```ts
+interface UpgradeDefinition {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  requiredLevel: number;
+  maxLevel: number;
+  effects: UpgradeEffect[];
+}
+```
+
+Эффекты улучшений рассчитываются общей системой модификаторов или селекторами. Нельзя разбрасывать проверки конкретных улучшений по десяткам файлов.
+
+Экономика должна гарантировать:
+
+- отсутствие отрицательных монет;
+- отсутствие двойной покупки;
+- отсутствие двойной награды;
+- корректное повышение нескольких уровней;
+- невозможность купить закрытый объект;
+- сохранение результата сразу после важной операции.
+
+---
+
+## 14. Инвентарь
+
+Инвентарь хранится в доменном состоянии:
+
+```ts
+interface InventoryState {
+  items: Record<string, number>;
+  capacity?: number;
+}
+```
+
+Все изменения проходят через единые операции:
+
+```text
+addItem
+removeItem
+hasItem
+getItemCount
+```
+
+Сцены и панели не изменяют количество предметов напрямую.
+
+---
+
+## 15. Управление
+
+Игра проектируется сначала для касания.
+
+Правила:
+
+- обычный tap выполняет основное действие;
+- важные действия имеют видимую кнопку;
+- минимальная рекомендуемая зона нажатия — 48 логических пикселей;
+- зона нажатия может быть больше изображения;
+- жест перемещения камеры не должен случайно покупать объект;
+- двойное нажатие разрешается как замена desktop-связок только в понятных случаях;
+- долгое нажатие используется только для вторичной информации;
+- основная механика не прячется за long press;
+- клавиатура доступна на PC, но не обязательна;
+- весь pointer input проходит через общий контроллер.
+
+Для ребёнка нельзя использовать:
+
+- маленькие подписи;
+- плотные таблицы;
+- обязательный hover;
+- правую кнопку мыши;
+- Shift-click;
+- действия, требующие точного тайминга.
+
+---
+
+## 16. UI для ребёнка
+
+- большие понятные элементы;
+- иконка плюс короткая подпись;
+- одна главная задача на панели;
+- одна крупная открытая панель одновременно;
+- понятная кнопка закрытия;
+- мгновенная визуальная реакция;
+- мягкие ошибки без наказания;
+- отсутствие сложных desktop-таблиц на телефоне;
+- отсутствие рекламы и манипулятивных механик;
+- отсутствие случайных платных действий;
+- игра должна быть понятна без звука;
+- важный звук всегда имеет визуальную обратную связь.
+
+Не добавлять аналитику, рекламу, аккаунты или сетевое отслеживание без прямого задания владельца.
+
+---
+
+## 17. Ассеты
+
+Перед созданием нового ассета агент обязан:
+
+1. проверить существующие папки;
+2. проверить манифест;
+3. найти возможный PNG, SVG или звук;
+4. проверить размер и прозрачность;
+5. понять, не является ли файл вариантом уже существующего объекта.
+
+Правила:
+
+- сохранять соотношение сторон;
+- использовать единый Asset Manifest;
+- новые имена файлов писать в `lowercase-kebab-case`;
+- не перезаписывать оригинал ради уменьшения;
+- оптимизированные версии хранить отдельно;
+- не загружать все локации в GPU одновременно;
+- загружать ассеты локации по необходимости;
+- все реально используемые состояния должны быть предзагружены;
+- ошибка загрузки не считается успехом;
+- при ошибке показывается контролируемая заглушка;
+- временные SVG должны иметь понятные имена;
+- нельзя молча подменять персонажа чужим изображением.
+
+---
+
+## 18. Звук
+
+Все звуки управляются `AudioSystem`.
+
+Категории:
+
+- музыка;
+- интерфейс;
+- шаги;
+- животные;
+- работники;
+- покупки;
+- монеты;
+- опыт;
+- уровень;
+- сбор продукта;
+- окружение.
+
+Нельзя вызывать звук хаотично из каждого объекта без централизованного контроля громкости, паузы и жизненного цикла.
+
+Игра должна корректно переживать блокировку AudioContext и возобновлять звук только после разрешённого пользовательского действия.
+
+---
+
+## 19. Сохранение и миграции
+
+Каждое сохранение имеет версию схемы.
+
+```ts
+interface SaveGame {
+  schemaVersion: number;
+  savedAtIso: string;
   profile: PlayerProfileState;
   world: WorldState;
   economy: EconomyState;
@@ -418,111 +671,557 @@ interface SaveGameV2 {
 }
 ```
 
-Rules:
+Обязательные правила:
 
-- validate loaded data before use;
-- migrate old saves through explicit ordered migration functions;
-- never merge arbitrary unvalidated JSON directly into live state;
-- keep a backup of the last known-good save before replacing it;
-- use atomic-style writes where browser storage permits;
-- debounce routine writes, but force-save on important lifecycle events;
-- save after purchases, unlocks, rewards, and other important irreversible actions;
-- save on `visibilitychange`, `pagehide`, and controlled shutdown paths;
-- handle storage quota and corrupted JSON without crashing the game;
-- preserve the legacy save during early migration work so recovery remains possible.
+- загруженные данные валидируются;
+- миграции выполняются последовательно;
+- произвольный JSON не смешивается напрямую с live state;
+- перед записью нового сохранения хранится последняя исправная копия;
+- повреждённый JSON не должен ломать запуск;
+- ошибка quota обрабатывается;
+- старое сохранение сохраняется до успешного завершения миграции;
+- обычные записи можно debounce;
+- важные операции сохраняются немедленно;
+- сохранять при покупке, открытии, награде и изменении прогресса;
+- сохранять при `visibilitychange` и `pagehide`;
+- временные Phaser-состояния не сохраняются;
+- незавершённые задачи работников после загрузки перепроверяются;
+- повторная загрузка не должна повторять награду.
 
-A save bug is a release-blocking bug.
-
----
-
-## Performance budget
-
-Mobile performance is the default constraint.
-
-- Target stable 60 FPS on ordinary modern phones and tablets.
-- The game must degrade gracefully near 30 FPS without changing simulation speed.
-- Avoid per-frame object allocation in hot paths.
-- Reuse temporary vectors and objects where practical.
-- Pool frequently created effects, particles, and speech bubbles.
-- Cull or sleep distant entities when safe.
-- Do not preload every future location into GPU memory.
-- Load location-specific assets when needed and release them when appropriate.
-- Limit simultaneous particles and expensive blend effects on mobile.
-- Do not use CSS filters or DOM overlays as substitutes for Phaser rendering in the game world.
-- Measure before adding complex optimization code.
-
-Any new animation loop, timer, event listener, or scene subscription must have a clear cleanup path.
+Баг сохранения является блокирующим релиз дефектом.
 
 ---
 
-## TypeScript and code style
+## 20. Офлайн-прогресс
 
-- Keep TypeScript strict.
-- Do not use `any` to bypass modeling work.
-- Use discriminated unions for commands, events, entity modes, and task states.
-- Prefer named types over large anonymous object shapes.
-- Keep public APIs small.
-- Use early returns for invalid conditions.
-- Separate pure domain calculations from Phaser-facing code.
-- Keep functions short enough to understand without scrolling through unrelated behavior.
-- Name units explicitly: `durationMs`, `speedPxPerSecond`, `savedAtIso`.
-- Never rely on a comment to correct ambiguous units.
-- Avoid magic numbers; put gameplay constants in content data or named constants.
-- Comments should explain intent and constraints, not restate syntax.
+Офлайн-прогресс рассчитывается по разнице времени:
 
-Do not make broad formatting changes in files unrelated to the task.
+```text
+currentTime - savedAt
+```
 
----
+Разрешено рассчитывать:
 
-## Error handling and diagnostics
+- рост растений;
+- созревание продукта;
+- изменение голода;
+- завершение простых автоматизированных процессов.
 
-- Fail loudly in development for invalid content definitions.
-- In production, recover to a controlled state where possible.
-- Include entity IDs, location IDs, and command names in meaningful diagnostic messages.
-- Do not leave noisy per-frame logs.
-- Do not swallow asset, save, or migration failures.
-- User-facing errors must be simple and nontechnical.
-- Developer diagnostics must contain enough context to reproduce the issue.
+Нельзя симулировать каждый кадр отсутствия.
 
-Temporary debug UI must be disabled in production builds unless explicitly exposed as a developer mode.
+Нужно ограничить максимальное учитываемое время, чтобы длительное отсутствие не ломало баланс и не создавало огромные награды.
 
 ---
 
-## Testing requirements
+## 21. Производительность
 
-New domain behavior should be testable without starting a Phaser renderer.
+Мобильное устройство — основное ограничение.
 
-At minimum, cover:
+Цели:
 
-- XP rewards and multiple level-ups;
-- purchases with enough and insufficient coins;
-- animal feeding and product collection;
-- worker task reservation and completion;
-- crop and production timing;
-- save serialization and validation;
-- every save migration;
-- corrupted save recovery;
-- location bounds and camera clamp calculations;
-- touch interaction guards that prevent duplicate activation.
+- стабильные 60 FPS на обычных современных устройствах;
+- корректная игра около 30 FPS без изменения скорости симуляции;
+- отсутствие постоянного роста памяти;
+- отсутствие повторных listeners после смены сцены;
+- отсутствие лишних таймеров;
+- отсутствие полного набора всех текстур игры в памяти.
 
-For important gameplay flows, add browser-level tests where practical:
+Правила:
 
-1. start a new game;
-2. move Max with touch/pointer input;
-3. feed one animal;
-4. collect one product;
-5. receive coins and XP exactly once;
-6. save;
-7. reload;
-8. verify the same state is restored.
-
-Tests must not depend on real-time waiting when a clock can be injected or advanced.
+- не создавать объекты каждый кадр без необходимости;
+- переиспользовать временные структуры в горячих путях;
+- использовать pooling для частых эффектов;
+- усыплять или упрощать далёкие сущности;
+- ограничивать частицы;
+- освобождать ресурсы сцен;
+- каждый listener и subscription имеет cleanup;
+- не использовать DOM и CSS-фильтры вместо Phaser-отрисовки игрового мира;
+- сначала измерять, затем оптимизировать.
 
 ---
 
-## Required verification before completion
+## 22. TypeScript и стиль кода
 
-Use the repository scripts when available. The rewrite should eventually provide clear scripts for:
+- строгий TypeScript;
+- не использовать `any` для обхода проектирования;
+- команды, события и состояния оформлять discriminated union;
+- указывать единицы в именах: `durationMs`, `speedPxPerSecond`;
+- избегать магических чисел;
+- игровые параметры хранить в data или named constants;
+- чистые доменные расчёты отделять от Phaser;
+- функции не должны выполнять несколько несвязанных задач;
+- публичные API должны быть небольшими;
+- использовать ранние возвраты для ошибок;
+- комментарии объясняют причину и ограничение, а не синтаксис;
+- не форматировать массово несвязанные файлы;
+- не делать рефакторинг вне текущего этапа без необходимости.
+
+---
+
+## 23. Тестирование
+
+Доменная логика тестируется без Phaser renderer.
+
+Обязательные тесты:
+
+- покупка при достаточных монетах;
+- отказ при недостаточных монетах;
+- невозможность двойной покупки;
+- получение XP;
+- несколько level-up за одну награду;
+- кормление животного;
+- готовность продукта;
+- сбор продукта ровно один раз;
+- резервирование задачи работником;
+- отмена задачи;
+- рост культур;
+- эффекты улучшений;
+- сериализация сохранения;
+- валидация сохранения;
+- каждая миграция;
+- восстановление после повреждённого сохранения;
+- вычисление границ камеры;
+- защита от двойного touch-события;
+- офлайн-прогресс.
+
+Ключевой E2E-сценарий:
+
+1. начать новую игру;
+2. пройти Максом по лугу;
+3. купить животное;
+4. покормить его;
+5. дождаться продукта через управляемое время;
+6. собрать продукт;
+7. получить монеты и XP один раз;
+8. нанять работника;
+9. увидеть выполнение задачи;
+10. сохранить;
+11. перезагрузить страницу;
+12. проверить восстановление состояния;
+13. убедиться, что награда не начислилась повторно.
+
+Тесты времени не должны ждать реальные минуты, если можно внедрить clock.
+
+---
+
+# 24. Полный план разработки
+
+Агент выполняет этапы строго последовательно.
+
+Нельзя переходить к следующему этапу, пока критерии текущего не выполнены и не проверены.
+
+---
+
+## Stage 0 — подготовка переписывания
+
+Цель: безопасно подготовить проект, не разрушив legacy-версию.
+
+Задачи:
+
+- работать в ветке `rewrite/phaser-stage-1`;
+- изучить существующие data, ассеты и сохранение;
+- создать реестр переносимых механик;
+- создать реестр ассетов;
+- зафиксировать известные legacy-баги;
+- определить формат нового состояния;
+- определить формат миграции;
+- настроить строгий TypeScript;
+- добавить скрипты build, typecheck и test;
+- не удалять legacy-код до запуска первого вертикального среза.
+
+Готово, когда:
+
+- новый код может развиваться отдельно;
+- сборка и проверки имеют понятные команды;
+- известны источники основных данных и ассетов;
+- существует план миграции сохранения.
+
+---
+
+## Stage 1 — технический вертикальный срез
+
+Цель: доказать правильность новой архитектуры на маленькой законченной части игры.
+
+Состав:
+
+- Phaser bootstrap;
+- BootScene;
+- PreloadScene;
+- WorldScene;
+- UIScene;
+- локация «Луг»;
+- Макс;
+- движение влево и вправо;
+- touch input;
+- клавиатура для PC;
+- горизонтальная камера;
+- правильное масштабирование телефона и планшета;
+- одно животное: цыплёнок или курица;
+- один работник;
+- одно кормление;
+- один продукт;
+- сбор продукта;
+- монеты;
+- XP;
+- level-up;
+- одна покупка;
+- сохранение и загрузка;
+- lifecycle-save при сворачивании.
+
+Не входит:
+
+- все животные;
+- все работники;
+- все локации;
+- полный магазин;
+- грядки;
+- дом;
+- мини-игры.
+
+Готово, когда ребёнок может пройти, покормить животное, собрать продукт, получить награду, перезагрузить страницу и продолжить без потери или дублирования прогресса.
+
+---
+
+## Stage 2 — полноценная базовая ферма
+
+Цель: превратить вертикальный срез в первую небольшую законченную игру.
+
+Добавить:
+
+- полную базовую петлю луга;
+- первую группу птиц;
+- курицу;
+- петуха;
+- цыплёнка;
+- утку;
+- гуся;
+- индюка;
+- загоны;
+- вместимость;
+- кормушки;
+- чистоту;
+- продукты;
+- центральную систему задач;
+- работников кормления;
+- работников уборки;
+- работников сбора;
+- полноценный магазин;
+- инвентарь;
+- базовые улучшения;
+- сохранение всей фермы;
+- ограниченный офлайн-прогресс;
+- звуки основных действий;
+- основные мобильные панели.
+
+Готово, когда игрок может:
+
+1. купить животное;
+2. поселить его в подходящий загон;
+3. покормить;
+4. дождаться продукта;
+5. собрать продукт;
+6. получить монеты и XP;
+7. купить улучшение;
+8. нанять работника;
+9. увидеть автоматическую работу;
+10. закрыть и восстановить игру без ошибок.
+
+---
+
+## Stage 3 — грядки и фруктовый сад
+
+Цель: добавить растительную часть фермы и новую локацию.
+
+Добавить:
+
+- локацию грядок;
+- подготовленные места посадки;
+- посадку;
+- полив;
+- стадии роста;
+- сбор урожая;
+- семена;
+- предметы урожая;
+- работников грядок;
+- фруктовый сад;
+- фруктовые деревья;
+- кусты;
+- сезоны роста только при явной необходимости;
+- покупки улучшений для роста и урожая;
+- правильный офлайн-расчёт роста;
+- переходы между локациями.
+
+Локации сохраняют собственные размеры и не сжимаются на телефоне.
+
+Готово, когда игрок может посадить, полить, дождаться роста, собрать урожай, перейти в сад, собрать фрукт и восстановить всё после перезагрузки.
+
+---
+
+## Stage 4 — остальные животные и локации
+
+Цель: перенести основной существующий контент игры.
+
+Добавлять контент группами, а не всем массивом сразу.
+
+Для каждой группы:
+
+1. добавить definition;
+2. проверить ассеты;
+3. добавить подходящий загон или область;
+4. определить продукт;
+5. определить потребности;
+6. проверить работника;
+7. проверить магазин;
+8. проверить сохранение;
+9. добавить тесты.
+
+Перенести существующие локации, включая:
+
+- уютный загон;
+- утиный пруд;
+- фруктовый сад;
+- солнечную пустыню;
+- остальные найденные в data локации.
+
+Для водных животных использовать отдельные разрешённые области, а не обычную сухопутную линию.
+
+Готово, когда весь утверждённый основной список животных доступен, каждая сущность имеет корректный дом, продукт, состояние, покупку и сохранение.
+
+---
+
+## Stage 5 — дом Макса
+
+Цель: реализовать домашнюю локацию и спокойные детские активности.
+
+Добавить:
+
+- игровую комнату;
+- перемещение или простые точки взаимодействия внутри дома;
+- полотно для рисования;
+- вход в рисовалку;
+- пазлы;
+- выход обратно в комнату;
+- сохранение необходимых настроек и результатов.
+
+Дом может использовать отличающуюся схему взаимодействия, но не должен нарушать единое состояние и систему сцен.
+
+Готово, когда ребёнок может войти в дом, открыть рисование, выйти, открыть пазл, собрать его и вернуться в ферму без потери состояния.
+
+---
+
+## Stage 6 — рисовалка и пазлы
+
+### Рисовалка
+
+Требования:
+
+- белое полотно на весь доступный экран;
+- карандаш;
+- фломастер;
+- кисть;
+- ластик;
+- разные толщины инструментов;
+- палитра примерно 12–16 цветов;
+- крупная кнопка выхода;
+- корректный touch drawing;
+- отсутствие прокрутки браузера во время рисования;
+- безопасная очистка холста;
+- сохранение рисунка локально при утверждённой механике;
+- стабильная работа на телефоне и планшете.
+
+### Пазлы
+
+Требования:
+
+- загрузка утверждённой цельной картинки;
+- разбиение на 4–6 крупных частей;
+- большие детали для ребёнка;
+- drag через touch;
+- магнитное соединение;
+- невозможность потерять деталь за экраном;
+- мягкая подсказка;
+- визуальная и звуковая награда;
+- возврат в комнату;
+- возможность добавлять новые картинки через content-файл.
+
+Готово, когда обе мини-игры полностью управляются пальцем и не ломают основной Phaser lifecycle.
+
+---
+
+## Stage 7 — полный прогресс и полировка
+
+Цель: связать весь контент в понятную законченную прогрессию.
+
+Добавить и проверить:
+
+- порядок открытия локаций;
+- уровни;
+- цены;
+- награды;
+- все утверждённые улучшения;
+- костюмы Макса;
+- полный магазин;
+- карточки животных;
+- карточки работников;
+- настройки звука;
+- понятные сообщения;
+- обучение без длинных текстов;
+- анимации реакции;
+- музыкальные переходы;
+- отсутствие тупиков экономики;
+- восстановление старых сохранений;
+- сбалансированный офлайн-прогресс.
+
+Провести отдельную проверку ребёнкоориентированного UI:
+
+- можно ли понять действие по картинке;
+- достаточно ли большая кнопка;
+- легко ли закрыть панель;
+- не перекрывает ли UI мир;
+- не требуется ли точное попадание;
+- не возникает ли случайная покупка.
+
+---
+
+## Stage 8 — стабилизация и выпуск
+
+Цель: подготовить браузерную сборку для телефона, планшета и PC.
+
+Обязательные задачи:
+
+- полный typecheck;
+- unit tests;
+- integration tests;
+- E2E ключевых сценариев;
+- тесты сохранения;
+- тесты миграции;
+- тесты сворачивания;
+- тесты поворота экрана;
+- тесты разных aspect ratio;
+- тесты Safari iOS;
+- тесты Chrome Android;
+- тесты desktop Chrome/Edge;
+- проверка AudioContext;
+- проверка памяти;
+- проверка FPS;
+- проверка загрузки ассетов;
+- проверка отсутствующих файлов;
+- проверка production build;
+- проверка статического хостинга;
+- проверка возврата после обновления страницы;
+- резервное восстановление сохранения.
+
+Не выпускать игру при наличии:
+
+- потери сохранения;
+- двойной награды;
+- двойной покупки;
+- зависания загрузки;
+- невозможности закрыть панель;
+- критического управления, недоступного на touch;
+- систематических падений FPS;
+- отсутствующего ключевого ассета без fallback.
+
+Готово, когда production-сборка запускается по браузерной ссылке и основной игровой путь полностью работает на телефоне, планшете и PC.
+
+---
+
+## 25. Запрет перескакивания между этапами
+
+Агент не должен начинать массовый перенос следующего этапа, пока текущий этап не имеет:
+
+- работающего пользовательского пути;
+- проверенного сохранения;
+- мобильной проверки;
+- тестов ключевой логики;
+- понятного итогового отчёта;
+- отсутствия известных блокирующих ошибок.
+
+Разрешаются только небольшие подготовительные интерфейсы, необходимые текущему этапу.
+
+---
+
+## 26. Git-процесс
+
+Основная ветка переписывания:
+
+```text
+rewrite/phaser-stage-1
+```
+
+Коммиты должны быть маленькими и тематическими.
+
+Примеры:
+
+```text
+chore: add Phaser game bootstrap
+feat: add Meadow world scene
+feat: add touch movement controller
+feat: add versioned save repository
+feat: add animal production flow
+fix: prevent duplicate collection reward
+refactor: extract worker task state machine
+```
+
+Нельзя:
+
+- force-push без прямого указания владельца;
+- менять историю без необходимости;
+- коммитить secrets;
+- коммитить build output;
+- смешивать архитектуру, баланс и массовую замену ассетов;
+- удалять legacy до подтверждённой замены;
+- делать широкое форматирование несвязанных файлов.
+
+Перед записью файла нужно прочитать его актуальную версию.
+
+---
+
+## 27. Порядок работы агента
+
+### Перед задачей
+
+1. прочитать `AGENTS.md`;
+2. определить текущий Stage;
+3. изучить связанные legacy-механики;
+4. изучить существующие ассеты;
+5. определить изменение состояния;
+6. проверить влияние на сохранение;
+7. проверить влияние на touch и mobile;
+8. сформулировать маленький проверяемый результат.
+
+### Во время работы
+
+1. сохранять один источник истины;
+2. использовать команды и события;
+3. не создавать второй store;
+4. учитывать elapsed time;
+5. чистить listeners;
+6. обновлять тесты;
+7. не переносить лишний контент;
+8. сообщать владельцу о найденных критических багах;
+9. делать небольшие коммиты.
+
+### Перед завершением
+
+1. изучить итоговый diff;
+2. запустить доступные проверки;
+3. проверить state transition;
+4. проверить повторное нажатие;
+5. проверить save/reload;
+6. проверить узкий экран;
+7. проверить touch flow;
+8. проверить отсутствие потерянных полей;
+9. указать, что реально было протестировано;
+10. честно перечислить непроверенное.
+
+Отчёты владельцу проекта писать на русском языке, ясно и с указанием конкретных файлов.
+
+---
+
+## 28. Обязательные команды проверки
+
+Проект должен предоставить:
 
 ```bash
 npm install
@@ -533,135 +1232,74 @@ npm run test
 npm run test:e2e
 ```
 
-For every task, run the relevant available checks. Never claim a command passed unless it was actually executed successfully.
+Нельзя заявлять, что команда прошла, если она не запускалась успешно.
 
-If the connector environment prevents local execution, state exactly what was changed and what remains unverified.
-
-A task is not complete merely because TypeScript compiles. Also verify the affected gameplay path, state transition, save behavior, and mobile layout implications.
+При отсутствии локального выполнения через connector нужно прямо написать, что изменение проверено только чтением файлов или GitHub API.
 
 ---
 
-## Stage 1 vertical slice
+## 29. Жёсткие запреты
 
-The first rewrite milestone should prove the architecture using a small complete slice:
+Агенту запрещено:
 
-- Meadow location;
-- Max with horizontal movement;
-- horizontally following camera;
-- one chick or chicken;
-- one worker;
-- tap-based interaction;
-- feed animal;
-- collect one product;
-- coins;
-- XP and level-up;
-- minimal shop purchase;
-- save and reload;
-- phone and tablet scaling;
-- mobile lifecycle save;
-- no dependency on legacy React gameplay code.
-
-Do not migrate all animals, locations, menus, and workers before this slice is stable.
-
----
-
-## Git workflow
-
-Primary rewrite branch:
-
-```text
-rewrite/phaser-stage-1
-```
-
-Make small commits with a single purpose. Preferred message style:
-
-```text
-chore: add Phaser game bootstrap
-feat: add Meadow world scene
-feat: add touch movement controller
-feat: add versioned save repository
-fix: prevent duplicate animal reward
-refactor: extract worker task state machine
-```
-
-Rules:
-
-- inspect the current branch and file contents before writing;
-- do not commit generated build output;
-- do not commit secrets or local environment files;
-- do not rewrite unrelated history;
-- do not force-push unless the owner explicitly requests it;
-- keep legacy code available through Git history while replacement is in progress;
-- avoid mixing asset replacement, balance changes, and architecture refactors in one commit.
+- снова строить игру на движущихся HTML-элементах;
+- добавлять конкурирующее состояние;
+- скрыто мутировать persistent state;
+- зависеть от частоты кадров;
+- сохранять Phaser-объекты;
+- растягивать фон;
+- делать core gameplay зависимым от hover, right click или Shift;
+- прятать основное действие за long press;
+- использовать маленький desktop UI на телефоне;
+- молча удалять старое сохранение;
+- дважды начислять продукт;
+- дважды проводить покупку;
+- считать ошибку загрузки ассета успехом;
+- добавлять неподтверждённые внешние сервисы;
+- менять баланс одновременно с архитектурным переносом без задания;
+- заменять существующий арт, не проверив репозиторий;
+- говорить о пройденных тестах, которые не запускались;
+- переходить к следующему Stage при блокирующих ошибках текущего.
 
 ---
 
-## Agent working procedure
+## 30. Definition of Done для любой задачи
 
-Before coding:
+Задача завершена только когда:
 
-1. read this file;
-2. inspect relevant source and content definitions;
-3. identify whether the task affects persistent state or save migrations;
-4. identify mobile and touch consequences;
-5. find existing assets before inventing new paths;
-6. define a small verifiable completion target.
-
-While coding:
-
-1. keep the domain state authoritative;
-2. avoid duplicated sources of truth;
-3. use elapsed time correctly;
-4. clean up listeners and scene resources;
-5. preserve existing game content unless the task changes it;
-6. add or update tests with behavior changes;
-7. keep changes narrow.
-
-Before reporting completion:
-
-1. inspect the final diff;
-2. run available checks;
-3. verify no save fields were silently dropped;
-4. verify the affected touch flow;
-5. verify world coordinates and camera behavior on narrow screens;
-6. list any unverified assumptions honestly.
-
-Communicate progress and final summaries to the project owner in **Russian**, using clear language and concrete file names.
+- соответствует текущему Stage;
+- архитектура не нарушена;
+- изменение состояния выполняется один раз;
+- touch flow работает;
+- устройство не меняет скорость симуляции;
+- сохранение не теряет данные;
+- миграция добавлена при изменении схемы;
+- отсутствующий ассет имеет безопасный fallback;
+- listeners и ресурсы очищаются;
+- relevant tests обновлены;
+- доступные проверки пройдены;
+- diff не содержит несвязанных изменений;
+- итоговый отчёт объясняет изменение, проверку и ограничения.
 
 ---
 
-## Hard prohibitions
+## 31. Конечная цель
 
-Do not:
+Работа агента завершена не после создания Phaser-сцены и не после переноса одного уровня.
 
-- rebuild the game as moving HTML elements;
-- add a second competing game-state store;
-- mutate nested persistent state invisibly;
-- tie simulation speed to frame count or timer count;
-- save Phaser runtime objects;
-- stretch location artwork to fit arbitrary viewports;
-- require hover, right click, Shift-click, or keyboard input for core mobile gameplay;
-- hide critical child actions behind long press;
-- use tiny desktop UI on phones;
-- silently discard legacy save data;
-- award the same product or purchase twice from one tap;
-- treat failed asset loads as success;
-- add unrelated features during migration;
-- replace existing art without checking the repository first;
-- state that tests passed when they were not run.
+Конечный результат — полностью работающая детская браузерная игра, в которой:
 
----
-
-## Definition of done
-
-A change is done when:
-
-- it follows this architecture or clearly improves it;
-- its state transitions are correct and occur once;
-- it works with touch input;
-- it does not make simulation device-speed dependent;
-- it preserves or deliberately migrates save data;
-- it handles missing assets and invalid state safely;
-- relevant tests or checks pass;
-- the diff contains no unrelated rewrites;
-- the completion report states what changed, what was tested, and any remaining limitation.
+- Макс путешествует по всем утверждённым локациям;
+- животные живут и производят продукты;
+- работники выполняют задачи;
+- покупки и улучшения работают;
+- опыт и уровни развивают ферму;
+- грядки и сад дают урожай;
+- дом Макса доступен;
+- рисовалка работает пальцем;
+- пазлы собираются на телефоне и планшете;
+- игра сохраняется и восстанавливается;
+- старый полезный прогресс мигрируется;
+- интерфейс понятен ребёнку;
+- производительность стабильна;
+- production build запускается по браузерной ссылке на телефоне, планшете и PC.
