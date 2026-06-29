@@ -12,6 +12,7 @@
     "preview": "vite preview --host=0.0.0.0 --port=4173",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
+    "test:stage1-smoke": "node scripts/stage1-smoke.mjs",
     "fix:sprite-eyes": "python scripts/fix_sprite_eyes.py"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "phaser": "^4.2.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "vite": "^6.2.3"

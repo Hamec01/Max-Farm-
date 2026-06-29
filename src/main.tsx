@@ -1,22 +1,4 @@
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App.tsx';
-import { ErrorBoundary } from './ErrorBoundary.tsx';
-import { LoadingScreen, useAssetPreloader } from './components/LoadingScreen.tsx';
-import './index.css';
+import "./index.css";
+import { mountStage1Game } from "./stage1/bootstrap";
 
-function Root() {
-  const { ready, progress } = useAssetPreloader();
-  return (
-    <ErrorBoundary>
-      <App />
-      {!ready && <LoadingScreen progress={progress} />}
-    </ErrorBoundary>
-  );
-}
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <Root />
-  </StrictMode>,
-);
+mountStage1Game();
