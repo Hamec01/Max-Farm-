@@ -52,8 +52,8 @@ export const ZONE_FLORA: Partial<Record<LocationId, ZoneFloraConfig>> = {
       { top: "68%", left: "72%", emoji: "🌱" },
     ],
     trees: [
-      { top: "38%", left: "2%", emoji: "🌳", sizeClass: "text-6xl", fruits: ["🍎", "🍎", "🍎"] },
-      { top: "42%", left: "88%", emoji: "🌳", sizeClass: "text-5xl", fruits: ["🍎", "🍎"] },
+      { top: "62%", left: "2%", emoji: "🌳", sizeClass: "text-6xl", fruits: ["🍎", "🍎", "🍎"] },
+      { top: "64%", left: "88%", emoji: "🌳", sizeClass: "text-5xl", fruits: ["🍎", "🍎"] },
     ],
     bushes: [
       { top: "63%", left: "33%", accent: "🫐" },
@@ -152,8 +152,8 @@ export const ZONE_FLORA: Partial<Record<LocationId, ZoneFloraConfig>> = {
       { top: "86%", left: "35%", emoji: "🌱" },
     ],
     trees: [
-      { top: "34%", left: "6%", emoji: "🌳", sizeClass: "text-6xl", fruits: ["🍎", "🍎", "🍒"] },
-      { top: "40%", left: "82%", emoji: "🌳", sizeClass: "text-5xl", fruits: ["🍒", "🍎"] },
+      { top: "62%", left: "6%", emoji: "🌳", sizeClass: "text-6xl", fruits: ["🍎", "🍎", "🍒"] },
+      { top: "64%", left: "82%", emoji: "🌳", sizeClass: "text-5xl", fruits: ["🍒", "🍎"] },
     ],
     bushes: [
       { top: "67%", left: "70%", accent: "🌼" },
@@ -173,9 +173,9 @@ export const ZONE_FLORA: Partial<Record<LocationId, ZoneFloraConfig>> = {
       { top: "84%", left: "72%", emoji: "🍃" },
     ],
     trees: [
-      { top: "32%", left: "3%", emoji: "🌲", sizeClass: "text-6xl" },
-      { top: "38%", left: "78%", emoji: "🌳", sizeClass: "text-5xl" },
-      { top: "44%", left: "45%", emoji: "🌲", sizeClass: "text-4xl" },
+      { top: "58%", left: "3%", emoji: "🌲", sizeClass: "text-6xl" },
+      { top: "62%", left: "78%", emoji: "🌳", sizeClass: "text-5xl" },
+      { top: "64%", left: "45%", emoji: "🌲", sizeClass: "text-4xl" },
     ],
     bushes: [
       { top: "64%", left: "28%", accent: "🍄" },

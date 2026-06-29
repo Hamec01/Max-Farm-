@@ -2,6 +2,7 @@ import { ANIMAL_TEMPLATES, CROPS_CONFIG, TREES_CONFIG } from "../data";
 import { GARDEN_PLOT_COORDS, getGardenPlotApproach } from "../data/gardenPlots";
 import { WORLD_ZONES } from "../data/locations";
 import { LAKESIDE_POND } from "./penLogic";
+import { MEADOW_WALK_MAX_Y, MEADOW_WALK_MIN_Y } from "./sceneLayout";
 import {
   feedOneHungryAnimalInZone,
   GARDEN_PLOT_IDS,
@@ -64,7 +65,7 @@ export interface WorkerTaskTarget {
   treeId?: string;
 }
 
-export const WORKER_TRAVEL_WALK_SPEED = 28;
+export const WORKER_TRAVEL_WALK_SPEED = 28 / 3;
 export const WORKER_TASK_ARRIVE_DIST = 2.8;
 /** Единый порог «дошёл» — совпадает с stepWalk, иначе дёргается */
 export const WORKER_ARRIVE_DIST = 0.5;
@@ -86,12 +87,20 @@ export function pickTravelEdge(from: LocationId, to: LocationId): "left" | "righ
 
 export function getZoneExitPoint(from: LocationId, to: LocationId): { x: number; y: number } {
   const edge = pickTravelEdge(from, to);
-  return { x: edge === "right" ? 96 : 4, y: 72 + Math.random() * 10 };
+  const meadowRoute = from === "MEADOW" || to === "MEADOW";
+  const y = meadowRoute
+    ? MEADOW_WALK_MIN_Y + Math.random() * (MEADOW_WALK_MAX_Y - MEADOW_WALK_MIN_Y)
+    : 72 + Math.random() * 10;
+  return { x: edge === "right" ? 96 : 4, y };
 }
 
 export function getZoneEntryPoint(from: LocationId, to: LocationId): { x: number; y: number } {
   const edge = pickTravelEdge(from, to);
-  return { x: edge === "right" ? 6 : 94, y: 72 + Math.random() * 10 };
+  const meadowRoute = from === "MEADOW" || to === "MEADOW";
+  const y = meadowRoute
+    ? MEADOW_WALK_MIN_Y + Math.random() * (MEADOW_WALK_MAX_Y - MEADOW_WALK_MIN_Y)
+    : 72 + Math.random() * 10;
+  return { x: edge === "right" ? 6 : 94, y };
 }
 
 export function isWorkerTraveling(pos: WorkerPositionState | undefined): boolean {

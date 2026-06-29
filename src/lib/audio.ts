@@ -61,13 +61,9 @@ export function setMuteState(muted: boolean) {
 
 /** Мгновенно обрывает все синтезированные звуки (клик по другому животному) */
 export function stopActiveSynthSounds() {
-  if (audioCtx) {
-    try {
-      audioCtx.close();
-    } catch {
-      /* ignore */
-    }
-    audioCtx = null;
+  if (!audioCtx) return;
+  if (audioCtx.state === "suspended" && audioUnlocked && !isMuted) {
+    void audioCtx.resume().catch(() => {});
   }
 }
 

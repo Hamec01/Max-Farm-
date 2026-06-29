@@ -18,7 +18,25 @@ const CUSTOM_SPRITE_SPECIES = new Set<AnimalSpecies>([
   AnimalSpecies.CHICKEN,
   AnimalSpecies.GOOSE,
   AnimalSpecies.TURKEY,
+  AnimalSpecies.RABBIT,
+  AnimalSpecies.SHEEP,
+  AnimalSpecies.PIG,
+  AnimalSpecies.GOAT,
+  AnimalSpecies.COW,
+  AnimalSpecies.BULL,
+  AnimalSpecies.DONKEY,
 ]);
+
+/** Папка в `/public/assets/animals/` — если отличается от id вида */
+const SPRITE_FOLDER: Partial<Record<AnimalSpecies, string>> = {
+  [AnimalSpecies.BULL]: "cow",
+};
+
+export const FILE_SPRITE_SPECIES = [...CUSTOM_SPRITE_SPECIES];
+
+function getSpriteFolder(species: AnimalSpecies): string {
+  return SPRITE_FOLDER[species] ?? species.toLowerCase();
+}
 
 function getSpriteBaseName(isSheared: boolean, isSad: boolean, isDirty: boolean): string {
   if (isSheared) return "bald";
@@ -54,7 +72,7 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
 }) => {
   const isSad = !isFed || happiness < 40;
   const isDirty = cleanliness < 50;
-  const folderName = species.toLowerCase();
+  const folderName = getSpriteFolder(species);
   const spriteBaseName = getSpriteBaseName(!!isSheared, isSad, isDirty);
   const spriteCandidates = React.useMemo(
     () => getSpriteCandidates(folderName, spriteBaseName),
@@ -80,7 +98,7 @@ export const AnimalSVG: React.FC<AnimalSVGProps> = ({
           src={spriteSrc}
           alt={`${species} ${spriteBaseName}`}
           referrerPolicy="no-referrer"
-          className="w-full h-full object-contain select-none"
+          className="w-full h-full object-contain object-bottom select-none"
           onError={() => {
             const nextIndex = candidateIndex + 1;
             if (nextIndex < spriteCandidates.length) {

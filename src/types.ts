@@ -130,6 +130,7 @@ export interface LocationConfig {
   isUnlocked: boolean;
   bgGradient: string;
   minLevel: number;
+  backgroundImage?: string;
 }
 
 export interface FarmUpgrade {
@@ -218,7 +219,11 @@ export interface BuildingConfig {
   y: number;
 }
 
+export type GameDifficulty = "normal" | "hard";
+
 export interface PlayerState {
+  /** normal — всё открыто, работники бесплатно; hard — как раньше */
+  difficulty?: GameDifficulty;
   coins: number;
   level: number;
   experience: number;

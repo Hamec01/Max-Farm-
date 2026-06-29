@@ -80,6 +80,7 @@ import {
   wanderAnimalAvoidingOthers,
   findAnimalSpawnPosition,
 } from "./lib/animalSpacing";
+import { clampWalkYForZone, getGroundYForZone } from "./lib/sceneLayout";
 import {
   applyPenConstraints,
   findPenAtPoint,
@@ -201,7 +202,7 @@ export default function App() {
     "worker-lena": { x: 58, y: 78, targetX: 58, targetY: 78, isMoving: false, dir: "right", actionTimer: 0, currentZone: "BARNYARD" },
     "worker-pasha": { x: 68, y: 75, targetX: 68, targetY: 75, isMoving: false, dir: "right", actionTimer: 0, currentZone: "MEADOW" },
     "worker-andrey": { x: 78, y: 73, targetX: 78, targetY: 73, isMoving: false, dir: "right", actionTimer: 0, currentZone: "ORCHARD" },
-    "worker-dima": { x: LAKESIDE_POND.dockX, y: LAKESIDE_POND.dockY, targetX: LAKESIDE_POND.dockX, targetY: LAKESIDE_POND.dockY, isMoving: false, dir: "right", actionTimer: 0, currentZone: "LAKESIDE" },
+    "worker-dima": { x: 52, y: 74, targetX: 52, targetY: 74, isMoving: false, dir: "right", actionTimer: 0, currentZone: "LAKESIDE" },
     "worker-arina": { x: 82, y: 74, targetX: 82, targetY: 74, isMoving: false, dir: "left", actionTimer: 0, currentZone: "LAKESIDE" },
     "worker-sveta": { x: 35, y: 73, targetX: 35, targetY: 73, isMoving: false, dir: "right", actionTimer: 0, currentZone: "DESERT" },
     "worker-misha": { x: 42, y: 76, targetX: 42, targetY: 76, isMoving: false, dir: "right", actionTimer: 0, currentZone: "FOREST" },
@@ -295,9 +296,9 @@ export default function App() {
   // Character walking state
   const [boyPosition, setBoyPosition] = useState({
     x: 50,
-    y: 60,
+    y: getGroundYForZone("MEADOW"),
     targetX: 50,
-    targetY: 60,
+    targetY: getGroundYForZone("MEADOW"),
     isMoving: false,
     dir: "right" as "left" | "right",
   });
@@ -1114,6 +1115,26 @@ export default function App() {
   useLayoutEffect(() => {
     applyBoyVisuals(boyPositionRef.current);
   }, [effectiveZoom, activeZone, deviceKind, isMobileCamera]);
+
+  useEffect(() => {
+    if (isInteriorZone(activeZone)) return;
+    const groundLine = getGroundYForZone(activeZone);
+    setBoyPosition((prev) => {
+      if (
+        Math.abs(prev.y - groundLine) < 0.01 &&
+        Math.abs(prev.targetY - groundLine) < 0.01 &&
+        !prev.isMoving
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        y: groundLine,
+        targetY: groundLine,
+        isMoving: false,
+      };
+    });
+  }, [activeZone]);
 
   // Drag: позицию двигаем напрямую в DOM (left%/top%), React не ререндерим
   const flushDragDom = () => {
@@ -2344,7 +2365,7 @@ export default function App() {
   const moveBoy = (dx: number, dy: number) => {
     setBoyPosition((prev) => {
       const nextX = Math.max(5, Math.min(95, prev.targetX + dx));
-      const nextY = Math.max(54, Math.min(86, prev.targetY + dy)); // Constrained on lawn!
+      const nextY = clampWalkYForZone(activeZoneRef.current, prev.targetY + dy);
       return {
         ...prev,
         targetX: nextX,
@@ -2728,9 +2749,9 @@ export default function App() {
       return;
     }
 
-    // Limit check per active zone based on player level: min(10, level * 2)
+    // Hard limit: 10 animals per current level
     const animalsInCurrentZone = gameState.animals.filter(a => (a.locationId || "MEADOW") === activeZone).length;
-    const maxAllowed = Math.min(10, 2 * gameState.level);
+    const maxAllowed = 10;
     if (animalsInCurrentZone >= maxAllowed) {
       playSadSound();
       triggerNotification(`⚠️ Достигнут лимит! На Уровне ${gameState.level} можно держать до ${maxAllowed} животных на одной локации (максимум 10).`);
@@ -2740,7 +2761,10 @@ export default function App() {
     playAnimalSound(template.soundType);
     setGameState((prev) => {
       const freshId = `animal-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
-      const spawnPos = findAnimalSpawnPosition(prev.animals, activeZone);
+      const spawnPos = findAnimalSpawnPosition(prev.animals, activeZone, {
+        x: boyPositionRef.current.x,
+        y: boyPositionRef.current.y,
+      });
 
       const newAnimal: AnimalInstance = {
         id: freshId,
@@ -2758,7 +2782,7 @@ export default function App() {
       };
 
       triggerNotification(`🐣 Ура! Куплен ${template.nameRu}! Он гуляет по нашей ферме!`);
-      spawnFloatHeart(50, 50, template.emoji);
+      spawnFloatHeart(spawnPos.x, spawnPos.y - 4, template.emoji);
 
       return {
         ...prev,
@@ -3076,7 +3100,7 @@ export default function App() {
     const clickY = world.y;
 
     const constrainedX = Math.max(5, Math.min(95, clickX));
-    const constrainedY = Math.max(54, Math.min(86, clickY));
+    const constrainedY = clampWalkYForZone(activeZoneRef.current, clickY);
 
     if (targetElement.closest(".interactive-element") || targetElement.closest(".collectible-decor")) {
       return;
@@ -3298,6 +3322,8 @@ export default function App() {
 
   const activeAnimalsList = getAnimalsInZone(activeZone);
   const isNearMerchant = isBoyNear(merchantCoords.x, merchantCoords.y);
+  const stageBackgroundImage = LOCATIONS[activeZone]?.backgroundImage ?? null;
+  const useLevelArt = Boolean(stageBackgroundImage) && activeZone !== "GARDEN" && activeZone !== "MAX_HOME";
 
   const onSelectZoneWithLock = (locId: LocationId) => {
     const loc = LOCATIONS[locId];
@@ -3308,11 +3334,12 @@ export default function App() {
         specialReturnZoneRef.current = activeZone;
       }
       setActiveZone(locId);
+      const landingY = isInteriorZone(locId) ? (locId === "GARDEN" ? 63 : 72) : getGroundYForZone(locId);
       setBoyPosition({
         x: 50,
-        y: locId === "GARDEN" ? 63 : locId === "MAX_HOME" ? 72 : 70,
+        y: landingY,
         targetX: 50,
-        targetY: locId === "GARDEN" ? 63 : locId === "MAX_HOME" ? 72 : 70,
+        targetY: landingY,
         isMoving: false,
         dir: "right",
       });
@@ -3354,8 +3381,9 @@ export default function App() {
     if (!isInterior) return;
     playClickSound();
     const back = specialReturnZoneRef.current;
+    const landingY = isInteriorZone(back) ? 72 : getGroundYForZone(back);
     setActiveZone(back);
-    setBoyPosition({ x: 50, y: 70, targetX: 50, targetY: 70, isMoving: false, dir: "right" });
+    setBoyPosition({ x: 50, y: landingY, targetX: 50, targetY: landingY, isMoving: false, dir: "right" });
     setSelectedPlotId(null);
     triggerNotification(`⬆️ Возвращаемся: ${LOCATIONS[back].nameRu}`);
   };
@@ -3449,9 +3477,14 @@ export default function App() {
                 width: "100%",
                 height: "100%",
                 willChange: isPhone ? undefined : "transform",
+                backgroundImage: stageBackgroundImage ? `url("${stageBackgroundImage}")` : undefined,
+                backgroundSize: stageBackgroundImage ? "100% 100%" : undefined,
+                backgroundPosition: stageBackgroundImage ? "center top" : undefined,
+                backgroundRepeat: stageBackgroundImage ? "no-repeat" : undefined,
               }}
             >
               {/* 1. SKY CELESTIAL BODIES & LARGE LAYERED DRIFTING CLOUDS */}
+              {!useLevelArt && (
               <div className="absolute inset-0 z-0 select-none pointer-events-none overflow-hidden" id="dynamic-sky-layer">
                 {isNight ? (
                   <>
@@ -3481,6 +3514,7 @@ export default function App() {
                 <div className="absolute top-[26%] right-[32%] w-32 h-10 bg-white/45 rounded-full animate-drift-cloud-1" style={{ animationDelay: '-8s' }} />
                 <div className="absolute top-24 right-[5%] w-24 h-8 bg-white/25 rounded-full animate-drift-cloud-2" style={{ animationDelay: '-3s' }} />
               </div>
+              )}
 
             {/* === ДОМ МАКСА — уютный интерьер === */}
             {activeZone === "MAX_HOME" && (
@@ -3501,7 +3535,7 @@ export default function App() {
               />
             )}
 
-            {activeZone !== "MAX_HOME" && (
+            {!useLevelArt && activeZone !== "MAX_HOME" && (
             <>
             <div className="absolute inset-x-0 bottom-[36px] h-64 z-0 pointer-events-none select-none overflow-hidden">
               {/* Far Hills (Layer 1) - Darker/Cooler green */}
@@ -3576,7 +3610,7 @@ export default function App() {
             )}
 
             {/* Lakeside Pond layout — явный пруд с причалом */}
-            {activeZone === "LAKESIDE" && (
+            {!useLevelArt && activeZone === "LAKESIDE" && (
               <>
                 <div
                   className="absolute z-[8] pointer-events-none select-none rounded-t-[40%] border-4 border-sky-600/50 shadow-inner"
@@ -3622,6 +3656,7 @@ export default function App() {
             )}
 
             {/* 5. UNDERGROUND SOIL LAYER (CROSS-SECTION ACCORDING TO SCREENSHOT) */}
+            {!useLevelArt && (
             <div className="absolute bottom-0 inset-x-0 h-[38px] bg-gradient-to-b from-[#451A03] to-[#271207] z-10 select-none pointer-events-none border-t-[5px] border-[#92400E] shadow-[inset_0_4px_4px_rgba(0,0,0,0.4)]">
               {/* Scattered Pebbles in Cross Section */}
               <div className="absolute inset-0 opacity-45 flex justify-around items-center px-4">
@@ -3634,12 +3669,13 @@ export default function App() {
                 <span className="w-3 h-1 bg-[#78350F] rounded-full" />
               </div>
             </div>
+            )}
 
             {/* 🌳 GROUND FOLIAGE — трава, кусты и деревья по типу локации */}
-            {activeZone !== "MAX_HOME" && <GroundFoliage zone={activeZone} />}
+            {!useLevelArt && activeZone !== "MAX_HOME" && <GroundFoliage zone={activeZone} />}
 
             {/* Lakeside Extra Decor (Frog and Ducks) */}
-            {activeZone === "LAKESIDE" && (
+            {!useLevelArt && activeZone === "LAKESIDE" && (
               <div className="absolute inset-0 pointer-events-none select-none z-0" id="lakeside-extra-decor">
                 {/* Cute cartoon green frog sitting on the pond level */}
                 <span className="absolute bottom-[36px] left-[15%] text-3xl select-none animate-bounce z-11">🐸</span>
@@ -3650,7 +3686,7 @@ export default function App() {
             )}
 
             {/* Orchard Extra Decor (Honeybees searching flowers) */}
-            {activeZone === "ORCHARD" && (
+            {!useLevelArt && activeZone === "ORCHARD" && (
               <div className="absolute inset-0 pointer-events-none select-none z-0" id="orchard-extra-decor">
                 {/* Cute honeybees */}
                 <span className="absolute top-[32%] left-[28%] text-2xl animate-pulse select-none opacity-85 z-11">🐝</span>
@@ -3659,7 +3695,7 @@ export default function App() {
             )}
 
             {/* Barnyard Hay Decor */}
-            {activeZone === "BARNYARD" && (
+            {!useLevelArt && activeZone === "BARNYARD" && (
               <div className="absolute inset-x-0 bottom-10 pointer-events-none select-none opacity-40 flex justify-around z-0" id="hayyard-decor">
                 <div className="w-10 h-8 bg-amber-400 rounded-md border-b-2 border-amber-900/40 shadow flex items-center justify-center text-xs text-amber-900 font-bold">🌾</div>
                 <div className="w-10 h-8 bg-amber-400 rounded-md border-b-2 border-amber-900/40 shadow flex items-center justify-center text-xs text-amber-900 font-bold">🌾</div>
@@ -3724,7 +3760,7 @@ export default function App() {
             </div>
 
             {/* A. COZY RUSSIAN WOOD CABIN - Only in BARNYARD Room to avoid crowding meadow and lake! */}
-            {activeZone === "BARNYARD" && (
+            {!useLevelArt && activeZone === "BARNYARD" && (
               <div
                 onClick={(e) => {
                   e.stopPropagation();
@@ -3810,7 +3846,7 @@ export default function App() {
             )}
 
             {/* B. VINTAGE WOODEN WHEELBARROW CART - Only in BARNYARD Room to avoid crowding meadow! */}
-            {activeZone === "BARNYARD" && (
+            {!useLevelArt && activeZone === "BARNYARD" && (
               <div className="absolute left-[4%] bottom-[42px] w-[130px] h-[90px] select-none pointer-events-none z-10" id="rustic-wheelbarrow">
                 <svg viewBox="0 0 140 100" className="w-full h-full drop-shadow-md">
                   {/* Legs */}

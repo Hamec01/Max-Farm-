@@ -4,6 +4,7 @@ export type InputActionKind =
   | "doubleTap"
   | "longPress"
   | "drag"
+  | "walk-drag"
   | "pointerDown"
   | "context"
   | "-";

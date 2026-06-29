@@ -9,6 +9,8 @@ export interface DrawStroke {
   tool: DrawingTool;
   color: string;
   points: DrawPoint[];
+  /** Утолщение линии для пальца на телефоне */
+  widthMul?: number;
 }
 
 export const DRAWING_COLORS = [
@@ -48,7 +50,7 @@ export function drawStrokeOnContext(ctx: CanvasRenderingContext2D, stroke: DrawS
   ctx.save();
   ctx.globalCompositeOperation = style.composite;
   ctx.strokeStyle = style.strokeStyle;
-  ctx.lineWidth = style.lineWidth;
+  ctx.lineWidth = style.lineWidth * (stroke.widthMul ?? 1);
   ctx.globalAlpha = style.globalAlpha;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";

@@ -18,31 +18,11 @@ function getDeviceKind(width: number, height: number): DeviceKind {
   return "desktop";
 }
 
-/** Больше zoom = бличе камера (телефон). Меньше = шире обзор (ПК). */
-export function computeZoomScale(width: number, height: number, kind: DeviceKind): number {
-  const minDim = Math.min(width, height);
-  const isLandscape = width > height;
-
-  if (kind === "desktop") {
-    if (width >= 1600) return 1.22;
-    if (width >= 1280) return 1.28;
-    return 1.34;
-  }
-
-  if (kind === "tablet") {
-    // Альбом: шире обзор; портрет: чуть ближе
-    return isLandscape ? 1.38 : 1.54;
-  }
-
-  // Телефон — ближе камера (мир не влезает целиком; огород — отдельный zoom в App)
-  let zoom: number;
-  if (minDim <= 360) zoom = 2.28;
-  else if (minDim <= 390) zoom = 2.18;
-  else if (minDim <= 430) zoom = 2.08;
-  else zoom = 2.0;
-
-  if (isLandscape) zoom = Math.max(1.88, zoom - 0.12);
-  return zoom;
+/** Zoom камеры — только через worldCamera; здесь legacy fallback = 1 */
+export function computeZoomScale(_width: number, _height: number, kind: DeviceKind): number {
+  if (kind === "phone") return 0.88;
+  if (kind === "tablet") return 1.15;
+  return 1;
 }
 
 export function computeViewportHeight(

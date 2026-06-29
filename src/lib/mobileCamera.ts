@@ -52,7 +52,16 @@ export function screenFractionToWorld(
   baseZoom: number
 ) {
   // Клики считаем по baseZoom (как до мобильной адаптации); transform — по effectiveZoom
-  const coordZoom = deviceKind === "desktop" ? baseZoom : effectiveZoom;
+  const coordZoom =
+    deviceKind === "desktop" || deviceKind === "phone" ? baseZoom : effectiveZoom;
+
+  if (coordZoom <= 1 && shiftY <= 0) {
+    return {
+      x: fractionX * 100,
+      y: 100 - (1 - fractionY) * 100,
+    };
+  }
+
   const x = (fractionX * 100 + shiftX) / coordZoom;
   if (shiftY <= 0) {
     return {
@@ -79,6 +88,11 @@ export function buildStageTransform(
   return `scale(${zoom}) ${tx} translateY(${-shiftY / zoom}%)`;
 }
 
+/** Ширина/высота stage (%), чтобы при любом zoom уровень заполнял viewport без белых полос */
+export function resolveStageSizePercent(zoom: number): number {
+  return zoom > 0 ? 100 / zoom : 100;
+}
+
 /** ПК — прежняя логика зума без мобильных надстроек */
 export function resolveDesktopZoom(baseZoom: number, zone: LocationId): number {
   return zone === "MAX_HOME" ? baseZoom * 0.92 : baseZoom;
@@ -92,8 +106,8 @@ export function shouldFollowCamera(deviceKind: DeviceKind, zone: LocationId): bo
   return deviceKind !== "desktop" && zone !== "GARDEN" && !isInteriorZone(zone);
 }
 
-export function shouldCullOffscreen(deviceKind: DeviceKind, zone: LocationId): boolean {
-  return deviceKind === "phone" && shouldFollowCamera(deviceKind, zone);
+export function shouldCullOffscreen(_deviceKind: DeviceKind, _zone: LocationId): boolean {
+  return false;
 }
 
 export function resolveEffectiveZoom(
@@ -156,5 +170,5 @@ export function saveDebounceMs(kind: DeviceKind): number {
 }
 
 export function isLiteEffects(kind: DeviceKind): boolean {
-  return kind !== "desktop";
+  return kind === "tablet";
 }

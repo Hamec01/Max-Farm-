@@ -1,6 +1,7 @@
 import { ANIMAL_TEMPLATES } from "../data";
 import { WORLD_ZONES } from "../data/locations";
 import { AnimalInstance, AnimalSpecies, LocationId } from "../types";
+import { MEADOW_WALK_MAX_Y, MEADOW_WALK_MIN_Y } from "./sceneLayout";
 import {
   resolveAnimalFood,
   getAnimalHomeZone,
@@ -160,6 +161,12 @@ export function pickWorkerTravelZone(
 }
 
 export function randomSpotInZone(zone: LocationId): { x: number; y: number } {
+  if (zone === "MEADOW") {
+    return {
+      x: 8 + Math.random() * 84,
+      y: MEADOW_WALK_MIN_Y + Math.random() * (MEADOW_WALK_MAX_Y - MEADOW_WALK_MIN_Y),
+    };
+  }
   if (zone === "GARDEN") {
     return { x: 20 + Math.random() * 60, y: 56 + Math.random() * 14 };
   }

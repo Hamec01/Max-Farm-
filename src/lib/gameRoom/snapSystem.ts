@@ -13,12 +13,28 @@ export interface PieceSnapState {
   canvas: HTMLCanvasElement;
 }
 
-const SLOT_SNAP_RATIO = 0.18;
-const NEIGHBOR_SNAP_RATIO = 0.2;
+const SLOT_SNAP_RATIO = 0.32;
+const NEIGHBOR_SNAP_RATIO = 0.36;
+const MAGNET_SNAP_RATIO = 0.42;
 
 export function trySnapToSlot(piece: PieceSnapState): boolean {
   if (piece.locked) return false;
   const threshold = piece.width * SLOT_SNAP_RATIO;
+  const dx = piece.x - piece.correctX;
+  const dy = piece.y - piece.correctY;
+  if (Math.hypot(dx, dy) <= threshold) {
+    piece.x = piece.correctX;
+    piece.y = piece.correctY;
+    piece.locked = true;
+    return true;
+  }
+  return false;
+}
+
+/** Притягивание к ближайшему слоту при отпускании */
+export function magnetSnapToNearestSlot(piece: PieceSnapState): boolean {
+  if (piece.locked) return false;
+  const threshold = piece.width * MAGNET_SNAP_RATIO;
   const dx = piece.x - piece.correctX;
   const dy = piece.y - piece.correctY;
   if (Math.hypot(dx, dy) <= threshold) {

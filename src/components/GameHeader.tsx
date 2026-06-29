@@ -9,6 +9,7 @@ import { LOCATIONS } from "../data";
 import { playClickSound } from "../lib/audio";
 import { LOCATION_EMOJI } from "../data/locations";
 import { CoinIcon } from "./CoinIcon";
+import { FullscreenEnterButton } from "./FullscreenControls";
 
 interface GameHeaderProps {
   coins: number;
@@ -16,7 +17,10 @@ interface GameHeaderProps {
   experience: number;
   activeLocationId: LocationId;
   onOpenMap: () => void;
+  onOpenShop?: () => void;
   onOpenHelp: () => void;
+  onEnterFullscreen?: () => void;
+  isFullscreen?: boolean;
   isMuted: boolean;
   onToggleMute: () => void;
   day?: number;
@@ -30,7 +34,10 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
   experience,
   activeLocationId,
   onOpenMap,
+  onOpenShop,
   onOpenHelp,
+  onEnterFullscreen,
+  isFullscreen = false,
   isMuted,
   onToggleMute,
   day = 1,
@@ -117,6 +124,25 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
         </div>
 
         <div className="flex gap-1" id="hud-buttons">
+          {!isFullscreen && onEnterFullscreen && (
+            <FullscreenEnterButton onEnter={onEnterFullscreen} />
+          )}
+
+          {onOpenShop && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                playClickSound();
+                onOpenShop();
+              }}
+              className="w-8 h-8 lg:w-9 lg:h-9 bg-gradient-to-b from-amber-400 to-amber-600 rounded-lg border-2 border-[#92400E] hover:brightness-110 text-white flex items-center justify-center shadow-md hover:scale-105 active:scale-90 transition-all text-base lg:text-lg cursor-pointer"
+              title="Рынок: зверята, навыки, рабочие"
+              id="header-shop-button"
+            >
+              <span className="leading-none">🏪</span>
+            </button>
+          )}
+
           <button
             onClick={(e) => {
               e.stopPropagation();

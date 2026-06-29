@@ -146,7 +146,7 @@ export function setRoamerWillChange(root: HTMLElement | null, active: boolean): 
 }
 
 /** Скорость ходьбы работников — % мира в секунду (не зависит от FPS) */
-export const WORKER_WALK_SPEED = 22;
+export const WORKER_WALK_SPEED = 22 / 3;
 
 export interface WalkStep {
   x: number;

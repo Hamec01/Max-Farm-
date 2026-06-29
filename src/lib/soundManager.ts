@@ -143,7 +143,7 @@ function tryPlayAudioFile(src: string, channel: "character" | "sfx" = "sfx"): Pr
       }
     };
     audio.load();
-    setTimeout(() => done(false), 1200);
+    setTimeout(() => done(false), 2500);
   });
 }
 

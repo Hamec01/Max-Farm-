@@ -11,9 +11,9 @@ export function getPerformanceDeviceKind(): DeviceKind {
   return activeDeviceKind;
 }
 
-/** Тяжёлые PNG-спрайты (600KB+) — только ПК/планшет */
+/** PNG-спрайты на всех устройствах (в т.ч. iPhone) */
 export function shouldUseHeavySprites(): boolean {
-  return activeDeviceKind !== "phone";
+  return true;
 }
 
 /** Интервал ходьбы работников (подбрасывание — отдельно через RAF) */
@@ -30,7 +30,7 @@ export function shouldSpinTossedSprites(kind: DeviceKind = activeDeviceKind): bo
 
 /** Игровой тик (рост, голод, автоматизация) */
 export function gameTickMs(kind: DeviceKind = activeDeviceKind): number {
-  if (kind === "phone") return 1600;
+  if (kind === "phone") return 1200;
   if (kind === "tablet") return 1200;
   return 1000;
 }

@@ -5,6 +5,17 @@
 
 import { AnimalConfig, AnimalSpecies, CropConfig, CropType, TreeConfig, TreeType, LocationConfig, LocationId, PlayerState, FarmUpgrade, BuildingConfig } from "./types";
 import { createInitialPenStates } from "./lib/penLogic";
+import { normalizeLoadedDifficulty, allLocationIds } from "./lib/gameDifficulty";
+import {
+  MEADOW_GROUND_Y,
+  clampWalkYForZone,
+  MEADOW_BACKGROUND_SRC,
+  BARNYARD_BACKGROUND_SRC,
+  LAKESIDE_BACKGROUND_SRC,
+  ORCHARD_BACKGROUND_SRC,
+  DESERT_BACKGROUND_SRC,
+} from "./lib/sceneLayout";
+import { isInteriorZone } from "./data/locations";
 import { DEFAULT_MAX_OUTFIT_ID, MAX_OUTFITS } from "./data/maxOutfits";
 
 export const ANIMAL_TEMPLATES: Record<AnimalSpecies, AnimalConfig> = {
@@ -420,6 +431,7 @@ export const LOCATIONS: Record<LocationId, LocationConfig> = {
     unlockCost: 0,
     isUnlocked: true,
     bgGradient: "from-emerald-100 to-green-200",
+    backgroundImage: MEADOW_BACKGROUND_SRC,
     minLevel: 1
   },
   BARNYARD: {
@@ -429,6 +441,7 @@ export const LOCATIONS: Record<LocationId, LocationConfig> = {
     unlockCost: 0,
     isUnlocked: true,
     bgGradient: "from-amber-50 to-orange-100/80",
+    backgroundImage: BARNYARD_BACKGROUND_SRC,
     minLevel: 1
   },
   MAX_HOME: {
@@ -456,6 +469,7 @@ export const LOCATIONS: Record<LocationId, LocationConfig> = {
     unlockCost: 1200,
     isUnlocked: false,
     bgGradient: "from-sky-100 to-blue-200",
+    backgroundImage: LAKESIDE_BACKGROUND_SRC,
     minLevel: 4
   },
   ORCHARD: {
@@ -465,6 +479,7 @@ export const LOCATIONS: Record<LocationId, LocationConfig> = {
     unlockCost: 3000,
     isUnlocked: false,
     bgGradient: "from-teal-50 to-emerald-100",
+    backgroundImage: ORCHARD_BACKGROUND_SRC,
     minLevel: 6
   },
   DESERT: {
@@ -474,6 +489,7 @@ export const LOCATIONS: Record<LocationId, LocationConfig> = {
     unlockCost: 5000,
     isUnlocked: false,
     bgGradient: "from-amber-200 to-yellow-100",
+    backgroundImage: DESERT_BACKGROUND_SRC,
     minLevel: 8
   },
   FOREST: {
@@ -617,6 +633,7 @@ export const WORKER_DESCRIPTIONS: Record<string, string> = {
 };
 
 export const INITIAL_STATE: PlayerState = {
+  difficulty: "hard",
   coins: 100, // Start with ample budget to acquire first animal + seeds
   level: 1,
   experience: 0,
@@ -639,7 +656,7 @@ export const INITIAL_STATE: PlayerState = {
       happiness: 80,
       cleanliness: 90,
       x: 35,
-      y: 60,
+      y: MEADOW_GROUND_Y,
       scaleX: 1,
       locationId: "MEADOW"
     }
@@ -1180,6 +1197,20 @@ export function loadSavedGameState(): PlayerState {
     if (!saved) return fallback();
 
     const parsed = JSON.parse(saved) as Partial<PlayerState>;
+    const difficulty = normalizeLoadedDifficulty(parsed);
+    const normalizedAnimals = (Array.isArray(parsed.animals) ? parsed.animals : [...INITIAL_STATE.animals]).map((animal) => {
+      if (!animal || typeof animal !== "object") return animal;
+      const loc = ((animal as { locationId?: LocationId }).locationId || "MEADOW") as LocationId;
+      if (isInteriorZone(loc)) return animal;
+      const base = animal as { y?: number; groundY?: number; targetY?: number };
+      const y = clampWalkYForZone(loc, typeof base.y === "number" ? base.y : MEADOW_GROUND_Y);
+      return {
+        ...animal,
+        y,
+        groundY: clampWalkYForZone(loc, typeof base.groundY === "number" ? base.groundY : y),
+        targetY: clampWalkYForZone(loc, typeof base.targetY === "number" ? base.targetY : y),
+      };
+    });
 
     let workers = INITIAL_STATE.workers!.map((w) => ({ ...w }));
     if (Array.isArray(parsed.workers) && parsed.workers.length > 0) {
@@ -1193,27 +1224,34 @@ export function loadSavedGameState(): PlayerState {
           return { ...template, isActive: true };
         }
         const savedWorker = savedById.get(template.id);
-        if (!savedWorker) return { ...template };
-        return {
-          ...template,
-          isActive: savedWorker.isActive ?? false,
-          statusText: savedWorker.isActive ? "Помогает ухаживать за фермой" : template.statusText,
-        };
+        const base = savedWorker
+          ? {
+              ...template,
+              isActive: savedWorker.isActive ?? false,
+              statusText: savedWorker.isActive ? "Помогает ухаживать за фермой" : template.statusText,
+            }
+          : { ...template };
+        if (difficulty === "normal") {
+          return { ...base, dailyWage: 0, isActive: savedWorker?.isActive ?? true };
+        }
+        return base;
       });
     }
 
     return {
       ...INITIAL_STATE,
       ...parsed,
+      difficulty,
       coins: typeof parsed.coins === "number" ? parsed.coins : INITIAL_STATE.coins,
       level: typeof parsed.level === "number" ? parsed.level : INITIAL_STATE.level,
       experience: typeof parsed.experience === "number" ? parsed.experience : INITIAL_STATE.experience,
       activeLocation: parsed.activeLocation ?? INITIAL_STATE.activeLocation,
       inventory: parsed.inventory && typeof parsed.inventory === "object" ? parsed.inventory : { ...INITIAL_STATE.inventory },
-      animals: Array.isArray(parsed.animals) ? parsed.animals : [...INITIAL_STATE.animals],
+      animals: normalizedAnimals,
       crops: parsed.crops && typeof parsed.crops === "object" ? parsed.crops : { ...INITIAL_STATE.crops },
       trees: parsed.trees && typeof parsed.trees === "object" ? parsed.trees : { ...INITIAL_STATE.trees },
       unlockedLocations: (() => {
+        if (difficulty === "normal") return allLocationIds();
         const locs = Array.isArray(parsed.unlockedLocations)
           ? [...parsed.unlockedLocations]
           : [...INITIAL_STATE.unlockedLocations];

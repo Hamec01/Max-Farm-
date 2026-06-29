@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
 import { MAX_OUTFITS } from "../data/maxOutfits";
+import { FILE_SPRITE_SPECIES } from "./AnimalSVG";
+import {
+  MEADOW_BACKGROUND_SRC,
+  BARNYARD_BACKGROUND_SRC,
+  LAKESIDE_BACKGROUND_SRC,
+  ORCHARD_BACKGROUND_SRC,
+  DESERT_BACKGROUND_SRC,
+} from "../lib/sceneLayout";
 
 /** Те же кастомные PNG, что грузит WorkerSVG */
 const WORKER_SPRITE_IDS = [
@@ -24,17 +32,26 @@ const WORKER_SPRITE_IDS = [
   "worker-kolya",
 ];
 
-/** Те же спрайты животных, что грузит AnimalSVG */
-const ANIMAL_SPECIES = ["chick", "chicken", "goose", "turkey"];
-const ANIMAL_STATES = ["happy", "hungry"];
+const ANIMAL_STATES = ["happy", "hungry"] as const;
 
 function buildAssetList(): string[] {
   const max = MAX_OUTFITS.map((o) => `/assets/characters/maxim/${o.spriteFile}`);
   const workers = WORKER_SPRITE_IDS.map((id) => `/assets/characters/workers/${id}.png`);
-  const animals = ANIMAL_SPECIES.flatMap((s) =>
-    ANIMAL_STATES.map((st) => `/assets/animals/${s}/${st}.png`)
-  );
-  return [...max, ...workers, ...animals];
+  const animals = FILE_SPRITE_SPECIES.flatMap((species) => {
+    const folder =
+      species === "BULL" ? "cow" : species.toLowerCase();
+    return ANIMAL_STATES.map((st) => `/assets/animals/${folder}/${st}.png`);
+  });
+  const backgrounds = [
+    MEADOW_BACKGROUND_SRC,
+    "/assets/backgrounds/ground.png",
+    BARNYARD_BACKGROUND_SRC,
+    LAKESIDE_BACKGROUND_SRC,
+    ORCHARD_BACKGROUND_SRC,
+    DESERT_BACKGROUND_SRC,
+    "/assets/backgrounds/спрайты фруктовых деревьев и кустов.png",
+  ];
+  return [...backgrounds, ...max, ...workers, ...animals];
 }
 
 /**

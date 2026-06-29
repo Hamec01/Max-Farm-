@@ -28,11 +28,13 @@ export const DrawingGame: React.FC<DrawingGameProps> = ({ onClose, onSaved, init
   const strokesRef = useRef<DrawStroke[]>([]);
   const currentStrokeRef = useRef<DrawStroke | null>(null);
   const activePointerRef = useRef<number | null>(null);
+  const lastDrawnPointIdxRef = useRef(1);
 
   const [tool, setTool] = useState<DrawingTool>("pencil");
   const [color, setColor] = useState("#000000");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [undoCount, setUndoCount] = useState(0);
+  const [confirmAction, setConfirmAction] = useState<"clear" | "exit" | null>(null);
 
   const paintCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -45,6 +47,17 @@ export const DrawingGame: React.FC<DrawingGameProps> = ({ onClose, onSaved, init
     if (currentStrokeRef.current) {
       drawStrokeOnContext(ctx, currentStrokeRef.current);
     }
+  }, []);
+
+  const drawIncrementalSegment = useCallback((stroke: DrawStroke, fromIdx: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas || stroke.points.length <= fromIdx) return;
+    const ctx = canvas.getContext("2d")!;
+    const segment: DrawStroke = {
+      ...stroke,
+      points: stroke.points.slice(Math.max(0, fromIdx - 1)),
+    };
+    drawStrokeOnContext(ctx, segment);
   }, []);
 
   const resizeCanvas = useCallback(() => {
@@ -91,10 +104,10 @@ export const DrawingGame: React.FC<DrawingGameProps> = ({ onClose, onSaved, init
     img.src = initialImage;
   }, [initialImage]);
 
-  const getPoint = (e: React.PointerEvent) => {
+  const getPoint = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    return { x: clientX - rect.left, y: clientY - rect.top };
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -102,16 +115,36 @@ export const DrawingGame: React.FC<DrawingGameProps> = ({ onClose, onSaved, init
     if (activePointerRef.current !== null) return;
     activePointerRef.current = e.pointerId;
     canvasRef.current?.setPointerCapture(e.pointerId);
-    currentStrokeRef.current = { tool, color, points: [getPoint(e)] };
+    const widthMul = e.pointerType === "touch" ? 2 : 1;
+    currentStrokeRef.current = {
+      tool,
+      color,
+      points: [getPoint(e.clientX, e.clientY)],
+      widthMul,
+    };
+    lastDrawnPointIdxRef.current = 1;
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (activePointerRef.current !== e.pointerId || !currentStrokeRef.current) return;
     e.preventDefault();
     const stroke = currentStrokeRef.current;
-    const last = stroke.points[stroke.points.length - 1];
-    stroke.points.push(...interpolatePoints(last, getPoint(e), 3));
-    paintCanvas();
+    const native = e.nativeEvent as PointerEvent;
+    const coalesced =
+      typeof native.getCoalescedEvents === "function"
+        ? native.getCoalescedEvents()
+        : [native];
+    const step = e.pointerType === "touch" ? 1 : 2;
+    for (const ev of coalesced) {
+      const last = stroke.points[stroke.points.length - 1];
+      const next = getPoint(ev.clientX, ev.clientY);
+      stroke.points.push(...interpolatePoints(last, next, step));
+    }
+    const fromIdx = lastDrawnPointIdxRef.current;
+    if (stroke.points.length > fromIdx) {
+      drawIncrementalSegment(stroke, fromIdx);
+      lastDrawnPointIdxRef.current = stroke.points.length;
+    }
   };
 
   const endStroke = (e: React.PointerEvent) => {
@@ -123,6 +156,7 @@ export const DrawingGame: React.FC<DrawingGameProps> = ({ onClose, onSaved, init
     }
     currentStrokeRef.current = null;
     activePointerRef.current = null;
+    lastDrawnPointIdxRef.current = 1;
     try {
       canvasRef.current?.releasePointerCapture(e.pointerId);
     } catch {
@@ -140,23 +174,33 @@ export const DrawingGame: React.FC<DrawingGameProps> = ({ onClose, onSaved, init
   };
 
   const handleClear = () => {
-    if (!window.confirm("Стереть весь рисунок?")) return;
+    setConfirmAction("clear");
+  };
+
+  const confirmClear = () => {
     strokesRef.current = [];
     setUndoCount(0);
+    setConfirmAction(null);
     resizeCanvas();
     playClickSound();
   };
 
-  const handleExit = async () => {
+  const handleExit = () => {
     playClickSound();
     const hasContent = strokesRef.current.length > 0 || !!initialImage;
     if (hasContent) {
-      const save = window.confirm("Сохранить рисунок на мольберте?");
-      if (save && canvasRef.current) {
-        await saveDrawingDataUrl(canvasRef.current.toDataURL("image/png"));
-        playCoinSound();
-        onSaved?.();
-      }
+      setConfirmAction("exit");
+      return;
+    }
+    onClose();
+  };
+
+  const confirmExit = async (save: boolean) => {
+    setConfirmAction(null);
+    if (save && canvasRef.current) {
+      await saveDrawingDataUrl(canvasRef.current.toDataURL("image/png"));
+      playCoinSound();
+      onSaved?.();
     }
     onClose();
   };
@@ -191,7 +235,59 @@ export const DrawingGame: React.FC<DrawingGameProps> = ({ onClose, onSaved, init
         </button>
       </div>
 
-      <div ref={canvasWrapRef} className="flex-1 min-h-0 px-2 py-2">
+      {confirmAction && (
+        <div className="absolute inset-x-4 top-[4.5rem] z-[10003] flex flex-col items-center gap-3 p-4 bg-white/95 rounded-2xl border-4 border-amber-700 shadow-xl">
+          <p className="font-black text-amber-950 text-center text-sm sm:text-base">
+            {confirmAction === "clear" ? "Стереть весь рисунок?" : "Сохранить рисунок на мольберте?"}
+          </p>
+          <div className="flex flex-wrap justify-center gap-2">
+            {confirmAction === "clear" ? (
+              <>
+                <button
+                  type="button"
+                  onClick={confirmClear}
+                  className="px-5 py-3 bg-rose-500 text-white font-black rounded-xl border-4 border-rose-800 active:scale-95 touch-manipulation"
+                >
+                  Стереть
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmAction(null)}
+                  className="px-5 py-3 bg-white font-black rounded-xl border-4 border-amber-600 active:scale-95 touch-manipulation"
+                >
+                  Отмена
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => confirmExit(true)}
+                  className="px-5 py-3 bg-green-500 text-white font-black rounded-xl border-4 border-green-800 active:scale-95 touch-manipulation"
+                >
+                  Сохранить
+                </button>
+                <button
+                  type="button"
+                  onClick={() => confirmExit(false)}
+                  className="px-5 py-3 bg-white font-black rounded-xl border-4 border-amber-600 active:scale-95 touch-manipulation"
+                >
+                  Не сохранять
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmAction(null)}
+                  className="px-5 py-3 bg-sky-100 font-black rounded-xl border-4 border-sky-500 active:scale-95 touch-manipulation"
+                >
+                  Назад
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div ref={canvasWrapRef} className="flex-1 min-h-[50dvh] px-1 py-1 sm:px-2 sm:py-2">
         <canvas
           ref={canvasRef}
           className="block w-full h-full bg-white rounded-2xl border-4 border-amber-800 shadow-inner"
@@ -200,10 +296,12 @@ export const DrawingGame: React.FC<DrawingGameProps> = ({ onClose, onSaved, init
           onPointerMove={handlePointerMove}
           onPointerUp={endStroke}
           onPointerCancel={endStroke}
+          onLostPointerCapture={endStroke}
         />
       </div>
 
       <DrawingToolbar
+        compact
         tool={tool}
         color={color}
         paletteOpen={paletteOpen}

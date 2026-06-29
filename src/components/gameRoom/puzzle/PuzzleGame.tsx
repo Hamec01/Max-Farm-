@@ -7,6 +7,7 @@ import {
   PieceSnapState,
   trySnapToSlot,
   trySnapNeighbors,
+  magnetSnapToNearestSlot,
   isPuzzleComplete,
   scatterPieces,
 } from "../../../lib/gameRoom/snapSystem";
@@ -44,17 +45,18 @@ export const PuzzleGame: React.FC<PuzzleGameProps> = ({ onClose }) => {
 
   const layoutBoard = useCallback((pieceCount: number, imgW: number, imgH: number) => {
     const el = boardRef.current;
-    if (!el) return { w: 280, h: 200, scale: 0.3, boardX: 20, boardY: 20, trayY: 0 };
+    if (!el) return { w: 280, h: 200, scale: 0.3, boardX: 20, boardY: 20, trayY: 0, trayH: 100 };
     const rect = el.getBoundingClientRect();
-    const maxBoardW = rect.width * 0.55;
-    const maxBoardH = rect.height * 0.5;
-    const scale = Math.min(maxBoardW / imgW, maxBoardH / imgH);
-    const w = imgW * scale;
-    const h = imgH * scale;
+    const maxBoardW = rect.width * 0.88;
+    const maxBoardH = rect.height * 0.55;
+    const boardScale = Math.min(maxBoardW / imgW, maxBoardH / imgH);
+    const w = imgW * boardScale;
+    const h = imgH * boardScale;
     const boardX = (rect.width - w) / 2;
-    const boardY = rect.height * 0.08;
-    const trayY = boardY + h + 24;
-    return { w, h, scale, boardX, boardY, trayY };
+    const boardY = rect.height * 0.06;
+    const trayH = Math.min(rect.height * 0.16, 108);
+    const trayY = rect.height - trayH - 8;
+    return { w, h, scale: boardScale, boardX, boardY, trayY, trayH };
   }, []);
 
   const startPuzzle = async (config: PuzzleConfig, count: number) => {
@@ -78,7 +80,7 @@ export const PuzzleGame: React.FC<PuzzleGameProps> = ({ onClose }) => {
       x: 8,
       y: layout.trayY,
       w: (boardRef.current?.clientWidth ?? 400) - 16,
-      h: (boardRef.current?.clientHeight ?? 300) - layout.trayY - 8,
+      h: layout.trayH,
     });
     piecesRef.current = pieceStates;
     setPieces([...pieceStates]);
@@ -99,7 +101,8 @@ export const PuzzleGame: React.FC<PuzzleGameProps> = ({ onClose }) => {
   const handleSnap = () => {
     let snapped = false;
     piecesRef.current.forEach((p) => {
-      if (trySnapToSlot(p)) snapped = true;
+      if (magnetSnapToNearestSlot(p)) snapped = true;
+      else if (trySnapToSlot(p)) snapped = true;
     });
     if (trySnapNeighbors(piecesRef.current)) snapped = true;
     if (snapped) {
@@ -169,6 +172,14 @@ export const PuzzleGame: React.FC<PuzzleGameProps> = ({ onClose }) => {
     const onResize = () => tick((n) => n + 1);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    const short = Math.min(window.innerWidth, window.innerHeight);
+    if (short >= 640) return;
+    const t = window.setTimeout(() => startRandomPuzzle(), 120);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- auto-start once on phone mount
   }, []);
 
   const layout = boardRef.current
@@ -260,7 +271,7 @@ export const PuzzleGame: React.FC<PuzzleGameProps> = ({ onClose }) => {
               <img
                 src={ghostSrc}
                 alt=""
-                className="absolute inset-0 w-full h-full object-contain grayscale contrast-75 brightness-95 pointer-events-none select-none"
+                className="absolute inset-0 w-full h-full object-fill grayscale contrast-75 brightness-95 pointer-events-none select-none"
                 draggable={false}
               />
             )}

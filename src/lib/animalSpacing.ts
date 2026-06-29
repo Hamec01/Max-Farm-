@@ -1,12 +1,14 @@
 import type { AnimalInstance, LocationId } from "../types";
 import { isAnimalAirborne } from "./tossPhysics";
+import { clampWalkYForZone, getGroundYForZone } from "./sceneLayout";
+import { isInteriorZone } from "../data/locations";
 
 /** Minimum center-to-center distance so large animal sprites don't overlap */
 export const MIN_ANIMAL_DIST = 12;
 
-const clampAnimalPos = (x: number, y: number) => ({
+const clampAnimalPos = (x: number, y: number, locationId: LocationId) => ({
   x: Math.max(10, Math.min(90, x)),
-  y: Math.max(54, Math.min(86, y)),
+  y: clampWalkYForZone(locationId, y),
 });
 
 function animalLocation(a: AnimalInstance): LocationId {
@@ -14,7 +16,10 @@ function animalLocation(a: AnimalInstance): LocationId {
 }
 
 /** Push overlapping animals apart within one location group (multiple passes for stability) */
-export function separateAnimalsGroup(animals: AnimalInstance[]): AnimalInstance[] {
+export function separateAnimalsGroup(
+  animals: AnimalInstance[],
+  lockVerticalAxis = false
+): AnimalInstance[] {
   if (animals.length < 2) return animals;
 
   const result = animals.map((a) => ({ ...a }));
@@ -31,9 +36,9 @@ export function separateAnimalsGroup(animals: AnimalInstance[]): AnimalInstance[
         if (dist < MIN_ANIMAL_DIST) {
           const overlap = (MIN_ANIMAL_DIST - dist) / 2;
           const pushX = (dx / dist) * overlap * 1.15;
-          const pushY = (dy / dist) * overlap * 0.9;
-          const p1 = clampAnimalPos(a1.x - pushX, a1.y - pushY);
-          const p2 = clampAnimalPos(a2.x + pushX, a2.y + pushY);
+          const pushY = lockVerticalAxis ? 0 : (dy / dist) * overlap * 0.9;
+          const p1 = clampAnimalPos(a1.x - pushX, a1.y - pushY, animalLocation(a1));
+          const p2 = clampAnimalPos(a2.x + pushX, a2.y + pushY, animalLocation(a2));
           result[i] = { ...a1, ...p1 };
           result[j] = { ...a2, ...p2 };
         }
@@ -60,7 +65,8 @@ export function separateAnimalsByLocation(animals: AnimalInstance[]): AnimalInst
   groups.forEach((indices) => {
     if (indices.length < 2) return;
     const group = indices.map((i) => result[i]);
-    const separated = separateAnimalsGroup(group);
+    const groupLoc = animalLocation(group[0]);
+    const separated = separateAnimalsGroup(group, !isInteriorZone(groupLoc));
     separated.forEach((a, gi) => {
       result[indices[gi]] = a;
     });
@@ -89,7 +95,7 @@ export function wanderAnimalAvoidingOthers(
 ): AnimalInstance {
   const loc = animalLocation(animal);
   let dx = Math.random() * 8 - 4;
-  let dy = Math.random() * 6 - 3;
+  let dy = isInteriorZone(loc) ? Math.random() * 6 - 3 : 0;
 
   others.forEach((other) => {
     if (other.id === animal.id || animalLocation(other) !== loc) return;
@@ -99,11 +105,13 @@ export function wanderAnimalAvoidingOthers(
     if (odist < MIN_ANIMAL_DIST && odist > 0.1) {
       const strength = ((MIN_ANIMAL_DIST - odist) / MIN_ANIMAL_DIST) * 3.5;
       dx += (odx / odist) * strength;
-      dy += (ody / odist) * strength * 0.8;
+      if (isInteriorZone(loc)) {
+        dy += (ody / odist) * strength * 0.8;
+      }
     }
   });
 
-  const pos = clampAnimalPos(animal.x + dx, animal.y + dy);
+  const pos = clampAnimalPos(animal.x + dx, animal.y + dy, loc);
   return {
     ...animal,
     ...pos,
@@ -114,13 +122,32 @@ export function wanderAnimalAvoidingOthers(
 /** Find a spawn point that isn't on top of existing animals */
 export function findAnimalSpawnPosition(
   existing: AnimalInstance[],
-  locationId: LocationId
+  locationId: LocationId,
+  preferredPosition?: { x: number; y: number }
 ): { x: number; y: number } {
   const sameLoc = existing.filter((a) => animalLocation(a) === locationId);
+  const isOutdoor = !isInteriorZone(locationId);
+  const minX = isOutdoor ? 8 : 15;
+  const maxX = isOutdoor ? 92 : 85;
+  const outdoorGroundY = getGroundYForZone(locationId);
+  const minY = isOutdoor ? outdoorGroundY : 58;
+  const maxY = isOutdoor ? outdoorGroundY : 82;
+  const anchor = preferredPosition
+    ? {
+        x: Math.max(minX, Math.min(maxX, preferredPosition.x)),
+        y: isOutdoor ? outdoorGroundY : Math.max(minY, Math.min(maxY, preferredPosition.y)),
+      }
+    : null;
 
   for (let attempt = 0; attempt < 40; attempt++) {
-    const x = 15 + Math.random() * 70;
-    const y = 58 + Math.random() * 24;
+    const x = anchor
+      ? Math.max(minX, Math.min(maxX, anchor.x + (Math.random() - 0.5) * 14))
+      : minX + Math.random() * (maxX - minX);
+    const y = isOutdoor
+      ? outdoorGroundY
+      : anchor
+      ? Math.max(minY, Math.min(maxY, anchor.y + (Math.random() - 0.5) * 8))
+      : minY + Math.random() * (maxY - minY);
     const tooClose = sameLoc.some((a) => {
       const dx = a.x - x;
       const dy = a.y - y;
@@ -131,5 +158,5 @@ export function findAnimalSpawnPosition(
     }
   }
 
-  return { x: 50, y: 70 };
+  return { x: 50, y: isOutdoor ? outdoorGroundY : 70 };
 }
